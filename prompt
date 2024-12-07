@@ -1,0 +1,67 @@
+I'm writing a 6502 emulator with golang. All unit tests are to use testify.
+The CPU type is as follows:
+
+type CPU struct {
+    // Registers
+    A  uint8  // Accumulator
+    X  uint8  // X index register
+    Y  uint8  // Y index register
+    PC uint16 // Program Counter
+    SP uint8  // Stack Pointer
+    P  uint8  // Status Register (Flags)
+
+    // Memory
+    Memory [65536]uint8
+}
+
+The register flags are defined as:
+
+const (
+	FlagC uint8 = 0x01 // Carry
+	FlagZ uint8 = 0x02 // Zero
+	FlagI uint8 = 0x04 // Interrupt Disable
+	FlagD uint8 = 0x08 // Decimal Mode
+	FlagB uint8 = 0x10 // Break Command
+	FlagV uint8 = 0x40 // Overflow
+	FlagN uint8 = 0x80 // Negative
+)
+
+To create a new CPU type use the NewCPU() function.
+
+To execute a single opcode use func (c *CPU) execute(opcode uint8) uint8, which returns the number of cycles the opcode took.
+The execute functions should be coded inline, like so:
+
+	switch opcode {
+	case LDA_IMM:
+		c.A = c.readImmediate()
+		c.updateZN(c.A)
+		return 2
+
+The opcodes use a set of constants like so:
+
+LDA_IMM = 0xA9
+LDA_ZP  = 0xA5
+LDA_ZPX = 0xB5
+LDA_ABS = 0xAD
+LDA_ABX = 0xBD
+LDA_ABY = 0xB9
+LDA_INX = 0xA1
+LDA_INY = 0xB1
+
+The CPU type has the following helper functions.
+
+func (c *CPU) adc(value uint8)
+func (c *CPU) readImmediate() uint8
+func (c *CPU) readZeroPage() uint8
+func (c *CPU) readZeroPageX() uint8
+func (c *CPU) readAbsolute() uint8
+func (c *CPU) readAbsoluteX() (uint8, bool)
+func (c *CPU) readAbsoluteY() (uint8, bool)
+func (c *CPU) readIndirectX() uint8
+func (c *CPU) readIndirectY() (uint8, bool)
+func (c *CPU) readAbsoluteAddress() uint16
+func (c *CPU) readIndirectAddress(zeroPageAddr uint8) uint16
+func (c *CPU) push(value uint8)
+
+// updateZN updates Zero and Negative flags based on value
+func (c *CPU) updateZN(value uint8)
