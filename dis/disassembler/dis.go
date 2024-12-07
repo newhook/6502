@@ -5,27 +5,76 @@ import (
 	"strings"
 )
 
+type Location struct {
+	PC           uint16
+	Value        uint8
+	OperandBytes []byte
+	Inst         *Instruction
+}
+
+func (l Location) instruction() string {
+	if l.Inst == nil {
+		return fmt.Sprintf("$%04X: db $%02X        ; Invalid opcode\n", l.PC, l.Value)
+	}
+	operand := l.Inst.Mode.FormatOperand(l.OperandBytes)
+	if operand == "" {
+		return l.Inst.Name
+	}
+
+	// Special case for relative addressing - update target address based on PC
+	if l.Inst.Mode == Relative {
+		offset := int8(l.OperandBytes[0])
+		target := l.PC + 2 + uint16(offset)
+		return fmt.Sprintf("%s $%04X", l.Inst.Name, target)
+	}
+
+	return fmt.Sprintf("%s %s", l.Inst.Name, operand)
+}
+
+func (l Location) Size() int {
+	if l.Inst == nil {
+		return 1
+	}
+	return 1 + l.Inst.Mode.GetOperandBytes()
+}
+
+func (l Location) String() string {
+	var operandCount int
+	if l.Inst != nil {
+		operandCount = l.Inst.Mode.GetOperandBytes()
+	}
+
+	// Format the hex dump
+	var hexDump string
+	if operandCount == 0 {
+		hexDump = fmt.Sprintf("%02X", l.Value)
+	} else if operandCount == 1 {
+		hexDump = fmt.Sprintf("%02X %02X", l.Value, l.OperandBytes[0])
+	} else {
+		hexDump = fmt.Sprintf("%02X %02X %02X", l.Value, l.OperandBytes[0], l.OperandBytes[1])
+	}
+
+	return fmt.Sprintf("$%04X: %-8s  %s", l.PC, hexDump, l.instruction())
+}
+
 // Decode takes an opcode and returns the corresponding instruction
 func Decode(opcode byte) (Instruction, bool) {
 	instruction, exists := instructionSet[opcode]
 	return instruction, exists
 }
 
-// DisassembleInstruction formats a complete instruction with its operands
-func DisassembleInstruction(inst Instruction, operandBytes []byte, pc int) string {
-	operand := inst.Mode.FormatOperand(operandBytes)
-	if operand == "" {
-		return inst.Name
+func DisassembleInstructions(memory []byte) []Location {
+	pc := 0
+	endAddr := len(memory)
+
+	var rows []Location
+	for pc < endAddr {
+		loc := disassembleLocation(memory, pc)
+		rows = append(rows, loc)
+		pc += loc.Size()
 	}
 
-	// Special case for relative addressing - update target address based on PC
-	if inst.Mode == Relative {
-		offset := int8(operandBytes[0])
-		target := pc + 2 + int(offset)
-		return fmt.Sprintf("%s $%04X", inst.Name, target)
-	}
-
-	return fmt.Sprintf("%s %s", inst.Name, operand)
+	return rows
 }
 
 // DisassembleMemory disassembles a range of memory starting at the given address
@@ -35,54 +84,44 @@ func DisassembleMemory(memory []byte, startAddr int, length int) string {
 	endAddr := startAddr + length
 
 	for pc < endAddr {
-		// Get opcode
-		opcode := memory[pc]
-
-		// Decode instruction
-		inst, exists := instructionSet[opcode]
-		if !exists {
-			// Handle invalid opcode
-			fmt.Fprintf(&out, "$%04X: db $%02X        ; Invalid opcode\n", pc, opcode)
-			pc++
-			continue
-		}
-
-		// Get operand bytes based on addressing mode
-		operandCount := inst.Mode.GetOperandBytes()
-		var operandBytes []byte
-
-		// Bounds check
-		if pc+operandCount >= len(memory) {
-			fmt.Fprintf(&out, "$%04X: db $%02X        ; Incomplete instruction\n", pc, opcode)
-			break
-		}
-
-		// Extract operand bytes
-		if operandCount > 0 {
-			operandBytes = memory[pc+1 : pc+1+operandCount]
-		}
-
-		// Format the instruction with its operands
-		asmInst := DisassembleInstruction(inst, operandBytes, pc)
-
-		// Format the hex dump
-		var hexDump string
-		if operandCount == 0 {
-			hexDump = fmt.Sprintf("%02X", opcode)
-		} else if operandCount == 1 {
-			hexDump = fmt.Sprintf("%02X %02X", opcode, operandBytes[0])
-		} else {
-			hexDump = fmt.Sprintf("%02X %02X %02X", opcode, operandBytes[0], operandBytes[1])
-		}
-
-		// Output formatted line
-		fmt.Fprintf(&out, "$%04X: %-8s  %s\n", pc, hexDump, asmInst)
-
-		// Advance PC
-		pc += 1 + operandCount
+		loc := disassembleLocation(memory, pc)
+		out.WriteString(loc.String())
+		out.WriteString("\n")
+		pc += loc.Size()
 	}
 
 	return out.String()
+}
+
+func disassembleLocation(memory []byte, pc int) Location {
+	// Get opcode
+	opcode := memory[pc]
+	l := Location{PC: uint16(pc), Value: opcode}
+
+	// Decode instruction
+	inst, exists := instructionSet[opcode]
+	if !exists {
+		// Handle invalid opcode
+		return l
+	}
+
+	// Get operand bytes based on addressing mode
+	operandCount := inst.Mode.GetOperandBytes()
+
+	// Bounds check
+	if pc+operandCount >= len(memory) {
+		return l
+		//row := fmt.Sprintf("$%04X: db $%02X        ; Incomplete instruction\n", pc, opcode)
+		//return pc, row
+	}
+	l.Inst = &inst
+
+	// Extract operand bytes
+	if operandCount > 0 {
+		l.OperandBytes = memory[pc+1 : pc+1+operandCount]
+	}
+
+	return l
 }
 
 // DisassembleBytes is a convenience function for disassembling a slice of bytes
