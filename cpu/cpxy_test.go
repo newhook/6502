@@ -10,7 +10,7 @@ func TestCPXCPYAddressingModes(t *testing.T) {
 	tests := []struct {
 		name     string
 		opcode   uint8
-		setupMem func(*CPU, uint8)
+		setupMem func(*CPUAndMemory, uint8)
 		cycles   uint8
 		isX      bool // true for CPX, false for CPY
 	}{
@@ -18,7 +18,7 @@ func TestCPXCPYAddressingModes(t *testing.T) {
 		{
 			name:   "CPX Immediate",
 			opcode: CPX_IMM,
-			setupMem: func(c *CPU, value uint8) {
+			setupMem: func(c *CPUAndMemory, value uint8) {
 				c.Memory[0] = CPX_IMM
 				c.Memory[1] = value
 			},
@@ -28,7 +28,7 @@ func TestCPXCPYAddressingModes(t *testing.T) {
 		{
 			name:   "CPX Zero Page",
 			opcode: CPX_ZP,
-			setupMem: func(c *CPU, value uint8) {
+			setupMem: func(c *CPUAndMemory, value uint8) {
 				c.Memory[0] = CPX_ZP
 				c.Memory[1] = 0x42 // Zero page address
 				c.Memory[0x42] = value
@@ -39,7 +39,7 @@ func TestCPXCPYAddressingModes(t *testing.T) {
 		{
 			name:   "CPX Absolute",
 			opcode: CPX_ABS,
-			setupMem: func(c *CPU, value uint8) {
+			setupMem: func(c *CPUAndMemory, value uint8) {
 				c.Memory[0] = CPX_ABS
 				c.Memory[1] = 0x80 // Low byte of address
 				c.Memory[2] = 0x12 // High byte of address
@@ -53,7 +53,7 @@ func TestCPXCPYAddressingModes(t *testing.T) {
 		{
 			name:   "CPY Immediate",
 			opcode: CPY_IMM,
-			setupMem: func(c *CPU, value uint8) {
+			setupMem: func(c *CPUAndMemory, value uint8) {
 				c.Memory[0] = CPY_IMM
 				c.Memory[1] = value
 			},
@@ -63,7 +63,7 @@ func TestCPXCPYAddressingModes(t *testing.T) {
 		{
 			name:   "CPY Zero Page",
 			opcode: CPY_ZP,
-			setupMem: func(c *CPU, value uint8) {
+			setupMem: func(c *CPUAndMemory, value uint8) {
 				c.Memory[0] = CPY_ZP
 				c.Memory[1] = 0x42 // Zero page address
 				c.Memory[0x42] = value
@@ -74,7 +74,7 @@ func TestCPXCPYAddressingModes(t *testing.T) {
 		{
 			name:   "CPY Absolute",
 			opcode: CPY_ABS,
-			setupMem: func(c *CPU, value uint8) {
+			setupMem: func(c *CPUAndMemory, value uint8) {
 				c.Memory[0] = CPY_ABS
 				c.Memory[1] = 0x80 // Low byte of address
 				c.Memory[2] = 0x12 // High byte of address
@@ -107,7 +107,7 @@ func TestCPXCPYAddressingModes(t *testing.T) {
 				"M" + fmt.Sprintf("%x", cv.value)
 
 			t.Run(testName, func(t *testing.T) {
-				cpu := NewCPU()
+				cpu := NewCPUAndMemory()
 				cpu.PC = 1
 
 				// Set the appropriate register

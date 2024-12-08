@@ -7,7 +7,7 @@ import (
 
 func TestLDXImmediate(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name    string
@@ -69,7 +69,7 @@ func TestLDXImmediate(t *testing.T) {
 
 func TestLDXZeroPage(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name         string
@@ -105,7 +105,7 @@ func TestLDXZeroPage(t *testing.T) {
 
 func TestLDXZeroPageY(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name         string
@@ -153,7 +153,7 @@ func TestLDXZeroPageY(t *testing.T) {
 
 func TestLDXAbsolute(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name   string
@@ -190,7 +190,7 @@ func TestLDXAbsolute(t *testing.T) {
 
 func TestLDXAbsoluteY(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name     string

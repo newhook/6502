@@ -7,7 +7,7 @@ import (
 
 func TestORAInstructions(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name        string
@@ -15,7 +15,7 @@ func TestORAInstructions(t *testing.T) {
 		accumulator uint8
 		operand     uint8
 		expected    uint8
-		setup       func(*CPU)
+		setup       func(*CPUAndMemory)
 		cycles      uint8
 		expectZ     bool
 		expectN     bool
@@ -26,7 +26,7 @@ func TestORAInstructions(t *testing.T) {
 			accumulator: 0x55,
 			operand:     0xAA,
 			expected:    0xFF,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0xAA
 			},
 			cycles:  2,
@@ -39,7 +39,7 @@ func TestORAInstructions(t *testing.T) {
 			accumulator: 0x00,
 			operand:     0x00,
 			expected:    0x00,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x00
 			},
 			cycles:  2,
@@ -52,7 +52,7 @@ func TestORAInstructions(t *testing.T) {
 			accumulator: 0x0F,
 			operand:     0xF0,
 			expected:    0xFF,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x42 // Zero page address
 				c.Memory[0x0042] = 0xF0 // Operand
 			},
@@ -66,7 +66,7 @@ func TestORAInstructions(t *testing.T) {
 			accumulator: 0x03,
 			operand:     0x0C,
 			expected:    0x0F,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x42 // Zero page address
 				c.X = 0x02              // X offset
 				c.Memory[0x0044] = 0x0C // Operand at (0x42 + 0x02)
@@ -81,7 +81,7 @@ func TestORAInstructions(t *testing.T) {
 			accumulator: 0x55,
 			operand:     0xAA,
 			expected:    0xFF,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x34 // Low byte of address
 				c.Memory[0x0202] = 0x12 // High byte of address
 				c.Memory[0x1234] = 0xAA // Operand
@@ -96,7 +96,7 @@ func TestORAInstructions(t *testing.T) {
 			accumulator: 0x0F,
 			operand:     0xF0,
 			expected:    0xFF,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x34 // Low byte of address
 				c.Memory[0x0202] = 0x12 // High byte of address
 				c.X = 0x01              // X offset
@@ -112,7 +112,7 @@ func TestORAInstructions(t *testing.T) {
 			accumulator: 0x0F,
 			operand:     0xF0,
 			expected:    0xFF,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0xFF // Low byte of address
 				c.Memory[0x0202] = 0x12 // High byte of address
 				c.X = 0x01              // X offset causing page cross
@@ -146,12 +146,12 @@ func TestORAInstructions(t *testing.T) {
 
 func TestORAIndirectModes(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name     string
 		opcode   uint8
-		setup    func(*CPU)
+		setup    func(*CPUAndMemory)
 		expected uint8
 		cycles   uint8
 		expectZ  bool
@@ -160,7 +160,7 @@ func TestORAIndirectModes(t *testing.T) {
 		{
 			name:   "ORA Indirect,X",
 			opcode: ORA_INX,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0x0F
 				c.X = 0x02
 				c.Memory[0x0201] = 0x20 // Zero page address
@@ -177,7 +177,7 @@ func TestORAIndirectModes(t *testing.T) {
 		{
 			name:   "ORA Indirect,Y without page cross",
 			opcode: ORA_INY,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0x33
 				c.Y = 0x02
 				c.Memory[0x0201] = 0x20 // Zero page address
@@ -194,7 +194,7 @@ func TestORAIndirectModes(t *testing.T) {
 		{
 			name:   "ORA Indirect,Y with page cross",
 			opcode: ORA_INY,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0x0F
 				c.Y = 0xFF              // Will cause page cross
 				c.Memory[0x0201] = 0x20 // Zero page address

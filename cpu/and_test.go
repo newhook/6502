@@ -7,7 +7,7 @@ import (
 
 func TestANDInstructions(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name        string
@@ -15,7 +15,7 @@ func TestANDInstructions(t *testing.T) {
 		accumulator uint8
 		operand     uint8
 		expected    uint8
-		setup       func(*CPU)
+		setup       func(*CPUAndMemory)
 		cycles      uint8
 		expectZ     bool
 		expectN     bool
@@ -26,7 +26,7 @@ func TestANDInstructions(t *testing.T) {
 			accumulator: 0xFF,
 			operand:     0x0F,
 			expected:    0x0F,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x0F
 			},
 			cycles:  2,
@@ -39,7 +39,7 @@ func TestANDInstructions(t *testing.T) {
 			accumulator: 0xFF,
 			operand:     0x00,
 			expected:    0x00,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x00
 			},
 			cycles:  2,
@@ -52,7 +52,7 @@ func TestANDInstructions(t *testing.T) {
 			accumulator: 0xFF,
 			operand:     0x80,
 			expected:    0x80,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x80
 			},
 			cycles:  2,
@@ -65,7 +65,7 @@ func TestANDInstructions(t *testing.T) {
 			accumulator: 0xFF,
 			operand:     0x0F,
 			expected:    0x0F,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x42 // Zero page address
 				c.Memory[0x0042] = 0x0F // Operand
 			},
@@ -79,7 +79,7 @@ func TestANDInstructions(t *testing.T) {
 			accumulator: 0xFF,
 			operand:     0x0F,
 			expected:    0x0F,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x42 // Zero page address
 				c.X = 0x02              // X offset
 				c.Memory[0x0044] = 0x0F // Operand at (0x42 + 0x02)
@@ -94,7 +94,7 @@ func TestANDInstructions(t *testing.T) {
 			accumulator: 0xFF,
 			operand:     0x0F,
 			expected:    0x0F,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x34 // Low byte of address
 				c.Memory[0x0202] = 0x12 // High byte of address
 				c.Memory[0x1234] = 0x0F // Operand
@@ -109,7 +109,7 @@ func TestANDInstructions(t *testing.T) {
 			accumulator: 0xFF,
 			operand:     0x0F,
 			expected:    0x0F,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x34 // Low byte of address
 				c.Memory[0x0202] = 0x12 // High byte of address
 				c.X = 0x01              // X offset
@@ -125,7 +125,7 @@ func TestANDInstructions(t *testing.T) {
 			accumulator: 0xFF,
 			operand:     0x0F,
 			expected:    0x0F,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0xFF // Low byte of address
 				c.Memory[0x0202] = 0x12 // High byte of address
 				c.X = 0x01              // X offset causing page cross
@@ -159,12 +159,12 @@ func TestANDInstructions(t *testing.T) {
 
 func TestANDIndirectModes(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name      string
 		opcode    uint8
-		setup     func(*CPU)
+		setup     func(*CPUAndMemory)
 		expected  uint8
 		cycles    uint8
 		pageCross bool
@@ -172,7 +172,7 @@ func TestANDIndirectModes(t *testing.T) {
 		{
 			name:   "AND Indirect,X",
 			opcode: AND_INX,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0xFF
 				c.X = 0x02
 				c.Memory[0x0201] = 0x20 // Zero page address
@@ -187,7 +187,7 @@ func TestANDIndirectModes(t *testing.T) {
 		{
 			name:   "AND Indirect,Y without page cross",
 			opcode: AND_INY,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0xFF
 				c.Y = 0x02
 				c.Memory[0x0201] = 0x20 // Zero page address
@@ -202,7 +202,7 @@ func TestANDIndirectModes(t *testing.T) {
 		{
 			name:   "AND Indirect,Y with page cross",
 			opcode: AND_INY,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0xFF
 				c.Y = 0xFF              // Will cause page cross
 				c.Memory[0x0201] = 0x20 // Zero page address

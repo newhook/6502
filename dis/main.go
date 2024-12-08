@@ -10,6 +10,15 @@ import (
 	"strings"
 )
 
+type Memory [65536]uint8
+
+func (c *Memory) Read(address uint16) uint8 {
+	return c[address]
+}
+func (c *Memory) Write(address uint16, value uint8) {
+	c[address] = value
+}
+
 func main() {
 	// Command line flags
 	inputFile := flag.String("i", "", "Input binary file")
@@ -27,17 +36,18 @@ func main() {
 	}
 
 	// Create and initialize CPU
-	c := cpu.NewCPU()
-	len, err := LoadAndSetupBinary(c, *inputFile, int(startAddrInt))
+	memory := &Memory{}
+	c := cpu.NewCPU(memory)
+	len, err := LoadAndSetupBinary(c, memory, *inputFile, int(startAddrInt))
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return
 	}
 
-	fmt.Println(disassembler.DisassembleMemory(c.Memory[:], int(startAddrInt), len))
+	fmt.Println(disassembler.DisassembleMemory(memory[:], int(startAddrInt), len))
 }
 
-func LoadAndSetupBinary(c *cpu.CPU, filename string, startAddr int) (int, error) {
+func LoadAndSetupBinary(c *cpu.CPU, mem *Memory, filename string, startAddr int) (int, error) {
 	// Read the binary file
 	data, err := os.ReadFile(filename)
 	if err != nil {
@@ -45,22 +55,22 @@ func LoadAndSetupBinary(c *cpu.CPU, filename string, startAddr int) (int, error)
 	}
 
 	// Check if the binary will fit in memory
-	if int(startAddr)+len(data) > len(c.Memory) {
+	if int(startAddr)+len(data) > len(mem) {
 		return 0, fmt.Errorf("binary file too large for available memory")
 	}
 
 	// Copy binary data into CPU memory starting at 0xF000
 	for i, b := range data {
-		c.Memory[uint16(startAddr)+uint16(i)] = b
+		mem[uint16(startAddr)+uint16(i)] = b
 	}
 
 	// Set up reset vector at 0xFFFC-0xFFFD to point to 0xF000
-	c.Memory[0xFFFC] = 0x00 // Low byte
-	c.Memory[0xFFFD] = 0xF0 // High byte
+	mem[0xFFFC] = 0x00 // Low byte
+	mem[0xFFFD] = 0xF0 // High byte
 
 	// Set up IRQ vector at 0xFFFE-0xFFFF to point to 0xF5A4
-	c.Memory[0xFFFE] = 0xA4 // Low byte
-	c.Memory[0xFFFF] = 0xF5 // High byte
+	mem[0xFFFE] = 0xA4 // Low byte
+	mem[0xFFFF] = 0xF5 // High byte
 
 	// Set the Program Counter to the reset vector location
 	c.PC = uint16(startAddr)

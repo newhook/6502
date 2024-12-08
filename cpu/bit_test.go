@@ -7,14 +7,14 @@ import (
 
 func TestBITInstruction(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name        string
 		opcode      uint8
 		accumulator uint8
 		memValue    uint8
-		setup       func(*CPU)
+		setup       func(*CPUAndMemory)
 		cycles      uint8
 		expectZ     bool // Based on A & M
 		expectN     bool // Based on bit 7 of M
@@ -25,7 +25,7 @@ func TestBITInstruction(t *testing.T) {
 			opcode:      BIT_ZP,
 			accumulator: 0xFF,
 			memValue:    0x00,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x42 // Zero page address
 				c.Memory[0x0042] = 0x00 // Memory value
 			},
@@ -39,7 +39,7 @@ func TestBITInstruction(t *testing.T) {
 			opcode:      BIT_ZP,
 			accumulator: 0x00,
 			memValue:    0xC0, // Bits 7 and 6 set
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x42 // Zero page address
 				c.Memory[0x0042] = 0xC0 // Memory value
 			},
@@ -53,7 +53,7 @@ func TestBITInstruction(t *testing.T) {
 			opcode:      BIT_ZP,
 			accumulator: 0xFF,
 			memValue:    0x40, // Bit 6 set only
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x42 // Zero page address
 				c.Memory[0x0042] = 0x40 // Memory value
 			},
@@ -67,7 +67,7 @@ func TestBITInstruction(t *testing.T) {
 			opcode:      BIT_ABS,
 			accumulator: 0x00,
 			memValue:    0x80, // Bit 7 set only
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x34 // Low byte of address
 				c.Memory[0x0202] = 0x12 // High byte of address
 				c.Memory[0x1234] = 0x80 // Memory value
@@ -82,7 +82,7 @@ func TestBITInstruction(t *testing.T) {
 			opcode:      BIT_ABS,
 			accumulator: 0xFF,
 			memValue:    0x40, // Bit 6 set only
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x34 // Low byte of address
 				c.Memory[0x0202] = 0x12 // High byte of address
 				c.Memory[0x1234] = 0x40 // Memory value
@@ -120,24 +120,24 @@ func TestBITInstruction(t *testing.T) {
 
 func TestBITInstructionEdgeCases(t *testing.T) {
 	t.Skip()
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name   string
 		opcode uint8
-		setup  func(*CPU)
-		verify func(*CPU) bool
+		setup  func(*CPUAndMemory)
+		verify func(*CPUAndMemory) bool
 	}{
 		{
 			name:   "BIT preserves accumulator with all flags set",
 			opcode: BIT_ZP,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0x55
 				c.Memory[0x0201] = 0x42 // Zero page address
 				c.Memory[0x0042] = 0xC0 // Memory value (sets N and V)
 				c.P = 0x00              // Clear flags
 			},
-			verify: func(c *CPU) bool {
+			verify: func(c *CPUAndMemory) bool {
 				return c.A == 0x55 && // Accumulator preserved
 					c.P&FlagN != 0 && // N set from bit 7
 					c.P&FlagV != 0 // V set from bit 6
@@ -146,7 +146,7 @@ func TestBITInstructionEdgeCases(t *testing.T) {
 		{
 			name:   "BIT successive operations",
 			opcode: BIT_ABS,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0xFF
 				// First test location
 				c.Memory[0x0201] = 0x34
@@ -157,7 +157,7 @@ func TestBITInstructionEdgeCases(t *testing.T) {
 				c.Memory[0x0204] = 0x12
 				c.Memory[0x1235] = 0x40 // Sets V only
 			},
-			verify: func(c *CPU) bool {
+			verify: func(c *CPUAndMemory) bool {
 				// First BIT operation
 				c.Step()
 				firstN := c.P&FlagN != 0

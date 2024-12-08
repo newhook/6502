@@ -1,0 +1,103 @@
+# C64 Emulator Architecture Plan
+
+## Core Components to Implement
+
+### 1. Memory Management
+- Implement the C64's memory map (64KB total)
+- Memory banking system for ROM/RAM switching
+- Key memory regions:
+  - $0000-$9FFF: RAM
+  - $A000-$BFFF: BASIC ROM/RAM
+  - $C000-$CFFF: RAM
+  - $D000-$DFFF: I/O / Character ROM
+  - $E000-$FFFF: KERNAL ROM
+
+### 2. VIC-II (Video Interface Controller)
+- Implement sprite handling (8 hardware sprites)
+- Character modes (standard and multicolor)
+- Bitmap modes (high resolution and multicolor)
+- Screen memory and color memory handling
+- Raster interrupts
+- Screen refresh at 50Hz (PAL) or 60Hz (NTSC)
+
+### 3. SID (Sound Interface Device)
+- Three independent sound channels
+- Four waveforms per voice (triangle, sawtooth, pulse, noise)
+- ADSR envelope generator
+- Filter system (low-pass, band-pass, high-pass)
+- Ring modulation and synchronization
+
+### 4. CIA (Complex Interface Adapter) - Two chips
+- CIA1 (keyboard matrix, joystick port 2)
+- CIA2 (serial bus, user port, joystick port 1)
+- Timer functionality
+- Interrupt handling
+
+### 5. Input/Output Systems
+- Keyboard matrix scanning
+- Joystick ports
+- Serial IEC bus (disk drive interface)
+- Datasette port
+- User port
+
+## Implementation Strategy
+
+### Phase 1: Basic Framework
+1. Create a main C64 struct that coordinates all components
+2. Implement basic memory management and banking
+3. Set up component communication channels
+
+### Phase 2: Core Systems
+1. VIC-II implementation starting with basic character mode
+2. Basic SID implementation with single voice
+3. Simple CIA implementation for keyboard input
+
+### Phase 3: Advanced Features
+1. Complete VIC-II features (sprites, all video modes)
+2. Full SID implementation
+3. Complete CIA functionality
+4. IEC serial bus for disk drive support
+
+### Phase 4: Integration and Testing
+1. ROM loading and verification
+2. Cycle-accurate timing
+3. Full system integration tests
+4. Compatibility testing with common software
+
+## Testing Considerations
+
+1. Individual Component Tests
+- Memory banking operations
+- Video mode switches
+- Sound generation
+- Timer accuracy
+- Interrupt handling
+
+2. Integration Tests
+- Full system boot sequence
+- BASIC interpreter functionality
+- Peripheral communication
+- Known software compatibility
+
+3. Performance Tests
+- Cycle accuracy verification
+- Frame timing
+- Audio timing
+- Overall system performance
+
+## Additional Considerations
+
+1. Debug Features
+- Memory viewers/editors
+- Register monitors
+- Breakpoint system
+- Trace logging
+
+2. Save States
+- Component state serialization
+- Full system state save/restore
+
+3. Configuration
+- PAL/NTSC selection
+- Input mapping
+- Audio/video settings

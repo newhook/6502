@@ -7,13 +7,13 @@ import (
 
 func TestRegisterTransfers(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name        string
 		opcode      uint8
-		setup       func(*CPU)
-		verify      func(*CPU) bool
+		setup       func(*CPUAndMemory)
+		verify      func(*CPUAndMemory) bool
 		expectZ     bool
 		expectN     bool
 		affectFlags bool
@@ -21,11 +21,11 @@ func TestRegisterTransfers(t *testing.T) {
 		{
 			name:   "TAX - Transfer zero",
 			opcode: TAX,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0x00
 				c.X = 0xFF // Pre-set X to ensure it changes
 			},
-			verify: func(c *CPU) bool {
+			verify: func(c *CPUAndMemory) bool {
 				return c.X == 0x00 && c.A == 0x00
 			},
 			expectZ:     true,
@@ -35,11 +35,11 @@ func TestRegisterTransfers(t *testing.T) {
 		{
 			name:   "TAX - Transfer negative",
 			opcode: TAX,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0x80
 				c.X = 0x00
 			},
-			verify: func(c *CPU) bool {
+			verify: func(c *CPUAndMemory) bool {
 				return c.X == 0x80 && c.A == 0x80
 			},
 			expectZ:     false,
@@ -49,11 +49,11 @@ func TestRegisterTransfers(t *testing.T) {
 		{
 			name:   "TAY - Transfer positive",
 			opcode: TAY,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0x40
 				c.Y = 0x00
 			},
-			verify: func(c *CPU) bool {
+			verify: func(c *CPUAndMemory) bool {
 				return c.Y == 0x40 && c.A == 0x40
 			},
 			expectZ:     false,
@@ -63,11 +63,11 @@ func TestRegisterTransfers(t *testing.T) {
 		{
 			name:   "TXA - Transfer zero",
 			opcode: TXA,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.X = 0x00
 				c.A = 0xFF
 			},
-			verify: func(c *CPU) bool {
+			verify: func(c *CPUAndMemory) bool {
 				return c.A == 0x00 && c.X == 0x00
 			},
 			expectZ:     true,
@@ -77,11 +77,11 @@ func TestRegisterTransfers(t *testing.T) {
 		{
 			name:   "TYA - Transfer negative",
 			opcode: TYA,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Y = 0xFF
 				c.A = 0x00
 			},
-			verify: func(c *CPU) bool {
+			verify: func(c *CPUAndMemory) bool {
 				return c.A == 0xFF && c.Y == 0xFF
 			},
 			expectZ:     false,
@@ -91,11 +91,11 @@ func TestRegisterTransfers(t *testing.T) {
 		{
 			name:   "TSX - Transfer stack pointer",
 			opcode: TSX,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.SP = 0x7F
 				c.X = 0x00
 			},
-			verify: func(c *CPU) bool {
+			verify: func(c *CPUAndMemory) bool {
 				return c.X == 0x7F && c.SP == 0x7F
 			},
 			expectZ:     false,
@@ -105,12 +105,12 @@ func TestRegisterTransfers(t *testing.T) {
 		{
 			name:   "TXS - Transfer to stack pointer",
 			opcode: TXS,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.X = 0xFF
 				c.SP = 0x00
 				c.P = 0x00 // Clear flags
 			},
-			verify: func(c *CPU) bool {
+			verify: func(c *CPUAndMemory) bool {
 				return c.SP == 0xFF && c.X == 0xFF
 			},
 			expectZ:     false,
@@ -147,32 +147,32 @@ func TestRegisterTransfers(t *testing.T) {
 
 func TestTransferEdgeCases(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name   string
-		setup  func(*CPU)
-		verify func(*CPU) bool
+		setup  func(*CPUAndMemory)
+		verify func(*CPUAndMemory) bool
 	}{
 		{
 			name: "Multiple transfers preserve values",
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0x42
 				c.Memory[0x0200] = TAX
 				c.Memory[0x0201] = TAY
 			},
-			verify: func(c *CPU) bool {
+			verify: func(c *CPUAndMemory) bool {
 				return c.A == 0x42 && c.X == 0x42 && c.Y == 0x42
 			},
 		},
 		{
 			name: "Stack pointer circular transfer",
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.X = 0x55
 				c.Memory[0x0200] = TXS
 				c.Memory[0x0201] = TSX
 			},
-			verify: func(c *CPU) bool {
+			verify: func(c *CPUAndMemory) bool {
 				return c.X == 0x55 && c.SP == 0x55
 			},
 		},

@@ -10,7 +10,7 @@ func TestADC(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		setup  func(*CPU)
+		setup  func(*CPUAndMemory)
 		opcode uint8
 		want   uint8
 		wantA  uint8
@@ -19,7 +19,7 @@ func TestADC(t *testing.T) {
 	}{
 		{
 			name: "ADC_IMM simple addition",
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0x20
 				c.Memory[0] = 0x10
 			},
@@ -30,7 +30,7 @@ func TestADC(t *testing.T) {
 		},
 		{
 			name: "ADC_IMM with carry flag set",
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0x20
 				c.P = defaultFlags | FlagC
 				c.Memory[0] = 0x10
@@ -42,7 +42,7 @@ func TestADC(t *testing.T) {
 		},
 		{
 			name: "ADC_IMM with overflow",
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0x50
 				c.Memory[0] = 0x50
 			},
@@ -53,7 +53,7 @@ func TestADC(t *testing.T) {
 		},
 		{
 			name: "ADC_IMM resulting in zero",
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0xFF
 				c.Memory[0] = 0x01
 			},
@@ -64,7 +64,7 @@ func TestADC(t *testing.T) {
 		},
 		{
 			name: "ADC_ZP",
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0x10
 				c.Memory[0] = 0x42    // ZP address
 				c.Memory[0x42] = 0x20 // Value at ZP
@@ -76,7 +76,7 @@ func TestADC(t *testing.T) {
 		},
 		{
 			name: "ADC_ZPX",
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0x10
 				c.X = 0x05
 				c.Memory[0] = 0x42    // ZP address
@@ -89,7 +89,7 @@ func TestADC(t *testing.T) {
 		},
 		{
 			name: "ADC_ABS",
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0x10
 				c.Memory[0] = 0x80 // Low byte of address
 				c.Memory[1] = 0x12 // High byte of address
@@ -102,7 +102,7 @@ func TestADC(t *testing.T) {
 		},
 		{
 			name: "ADC_ABX no page cross",
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0x10
 				c.X = 0x05
 				c.Memory[0] = 0x80 // Low byte of address
@@ -116,7 +116,7 @@ func TestADC(t *testing.T) {
 		},
 		{
 			name: "ADC_ABX with page cross",
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0x10
 				c.X = 0xFF
 				c.Memory[0] = 0x80 // Low byte of address
@@ -130,7 +130,7 @@ func TestADC(t *testing.T) {
 		},
 		{
 			name: "ADC_ABY no page cross",
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0x10
 				c.Y = 0x05
 				c.Memory[0] = 0x80 // Low byte of address
@@ -144,7 +144,7 @@ func TestADC(t *testing.T) {
 		},
 		{
 			name: "ADC_INX",
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0x10
 				c.X = 0x05
 				c.Memory[0] = 0x80      // ZP address
@@ -159,7 +159,7 @@ func TestADC(t *testing.T) {
 		},
 		{
 			name: "ADC_INY no page cross",
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0x10
 				c.Y = 0x05
 				c.Memory[0] = 0x80      // ZP address
@@ -174,7 +174,7 @@ func TestADC(t *testing.T) {
 		},
 		{
 			name: "ADC_INY with page cross",
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0x10
 				c.Y = 0xFF
 				c.Memory[0] = 0x80      // ZP address
@@ -191,7 +191,7 @@ func TestADC(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := NewCPU()
+			c := NewCPUAndMemory()
 			tt.setup(c)
 
 			cycles := c.execute(tt.opcode)
@@ -266,7 +266,7 @@ func TestADCFlagBehavior(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := NewCPU()
+			c := NewCPUAndMemory()
 			c.A = tt.a
 			c.P = tt.initP
 			c.Memory[0] = tt.value
@@ -280,7 +280,7 @@ func TestADCFlagBehavior(t *testing.T) {
 
 func TestADCDecimalMode(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name        string

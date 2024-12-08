@@ -9,70 +9,70 @@ func TestROL(t *testing.T) {
 	tests := []struct {
 		name     string
 		opcode   uint8
-		setup    func(*CPU, uint8)
+		setup    func(*CPUAndMemory, uint8)
 		cycles   uint8
-		getValue func(*CPU) uint8
+		getValue func(*CPUAndMemory) uint8
 	}{
 		{
 			name:   "ROL Accumulator",
 			opcode: ROL_ACC,
-			setup: func(c *CPU, value uint8) {
+			setup: func(c *CPUAndMemory, value uint8) {
 				c.A = value
 			},
 			cycles: 2,
-			getValue: func(c *CPU) uint8 {
+			getValue: func(c *CPUAndMemory) uint8 {
 				return c.A
 			},
 		},
 		{
 			name:   "ROL Zero Page",
 			opcode: ROL_ZP,
-			setup: func(c *CPU, value uint8) {
+			setup: func(c *CPUAndMemory, value uint8) {
 				c.Memory[1] = 0x42 // Zero page address
 				c.Memory[0x42] = value
 			},
 			cycles: 5,
-			getValue: func(c *CPU) uint8 {
+			getValue: func(c *CPUAndMemory) uint8 {
 				return c.Memory[0x42]
 			},
 		},
 		{
 			name:   "ROL Zero Page,X",
 			opcode: ROL_ZPX,
-			setup: func(c *CPU, value uint8) {
+			setup: func(c *CPUAndMemory, value uint8) {
 				c.Memory[1] = 0x42     // Zero page address
 				c.X = 0x02             // X offset
 				c.Memory[0x44] = value // 0x42 + 0x02
 			},
 			cycles: 6,
-			getValue: func(c *CPU) uint8 {
+			getValue: func(c *CPUAndMemory) uint8 {
 				return c.Memory[0x44]
 			},
 		},
 		{
 			name:   "ROL Absolute",
 			opcode: ROL_ABS,
-			setup: func(c *CPU, value uint8) {
+			setup: func(c *CPUAndMemory, value uint8) {
 				c.Memory[1] = 0x80 // Low byte
 				c.Memory[2] = 0x12 // High byte
 				c.Memory[0x1280] = value
 			},
 			cycles: 6,
-			getValue: func(c *CPU) uint8 {
+			getValue: func(c *CPUAndMemory) uint8 {
 				return c.Memory[0x1280]
 			},
 		},
 		{
 			name:   "ROL Absolute,X",
 			opcode: ROL_ABX,
-			setup: func(c *CPU, value uint8) {
+			setup: func(c *CPUAndMemory, value uint8) {
 				c.Memory[1] = 0x80 // Low byte
 				c.Memory[2] = 0x12 // High byte
 				c.X = 0x02
 				c.Memory[0x1282] = value // 0x1280 + 0x02
 			},
 			cycles: 7,
-			getValue: func(c *CPU) uint8 {
+			getValue: func(c *CPUAndMemory) uint8 {
 				return c.Memory[0x1282]
 			},
 		},
@@ -97,7 +97,7 @@ func TestROL(t *testing.T) {
 	for _, tt := range tests {
 		for _, tc := range testCases {
 			t.Run(tt.name+"_"+tc.desc, func(t *testing.T) {
-				cpu := NewCPU()
+				cpu := NewCPUAndMemory()
 				cpu.PC = 1
 
 				if tc.carryIn {
