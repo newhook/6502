@@ -107,7 +107,7 @@ func TestFlagInstructions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cpu := NewCPU()
+			cpu := NewCPUAndMemory()
 
 			// Setup
 			cpu.P = tt.initFlags

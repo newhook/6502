@@ -33,8 +33,18 @@ func doStep() tea.Cmd {
 	})
 }
 
+type Memory [65536]uint8
+
+func (c *Memory) Read(address uint16) uint8 {
+	return c[address]
+}
+func (c *Memory) Write(address uint16, value uint8) {
+	c[address] = value
+}
+
 // Monitor represents the UI state
 type Monitor struct {
+	mem              *Memory
 	cpu              *cpu.CPU
 	paused           bool
 	width            int
@@ -106,16 +116,17 @@ var (
 )
 
 // Initialize the monitor
-func NewMonitor(cpu *cpu.CPU) *Monitor {
+func NewMonitor(cpu *cpu.CPU, mem *Memory) *Monitor {
 	ti := textinput.New()
 	ti.Placeholder = "Enter hex address (e.g. FF00)"
 	ti.CharLimit = 4
 	ti.Width = 6
 
 	m := &Monitor{
+		mem:           mem,
 		cpu:           cpu,
 		paused:        true,
-		locations:     disassembler.DisassembleInstructions(cpu.Memory[:]),
+		locations:     disassembler.DisassembleInstructions(mem[:]),
 		memoryAddress: 0,
 		activePane:    "disasm",
 		gotoInput:     ti,
@@ -129,7 +140,7 @@ func NewMonitor(cpu *cpu.CPU) *Monitor {
 func (m *Monitor) captureMemoryState() {
 	addr := m.memoryAddress
 	for i := 0; i < 64; i++ {
-		m.lastMemory[i] = m.cpu.Memory[addr+uint16(i)]
+		m.lastMemory[i] = m.mem[addr+uint16(i)]
 	}
 }
 
@@ -145,7 +156,7 @@ func (m Monitor) formatMemory() string {
 		// Add hex bytes
 		for col := 0; col < 8; col++ {
 			offset := row*8 + col
-			value := m.cpu.Memory[addr+uint16(col)]
+			value := m.mem[addr+uint16(col)]
 			lastValue := m.lastMemory[offset]
 
 			if value != lastValue {
@@ -159,7 +170,7 @@ func (m Monitor) formatMemory() string {
 		result.WriteString(" | ")
 		for col := 0; col < 8; col++ {
 			offset := row*8 + col
-			value := m.cpu.Memory[addr+uint16(col)]
+			value := m.mem[addr+uint16(col)]
 			lastValue := m.lastMemory[offset]
 
 			if value >= 32 && value <= 126 {
@@ -444,7 +455,7 @@ func (m Monitor) disassemble() string {
 func (m Monitor) formatStack() string {
 	var result strings.Builder
 	for i := uint16(0xFF); i >= uint16(m.cpu.SP); i-- {
-		result.WriteString(fmt.Sprintf("$%02X: %02X\n", i, m.cpu.Memory[0x100+i]))
+		result.WriteString(fmt.Sprintf("$%02X: %02X\n", i, m.mem[0x100+i]))
 	}
 	return result.String()
 }
@@ -542,7 +553,7 @@ func (m Monitor) View() string {
 	)
 }
 
-func LoadAndSetupBinary(c *cpu.CPU, filename string, startAddr int) (int, error) {
+func LoadAndSetupBinary(c *cpu.CPU, mem *Memory, filename string, startAddr int) (int, error) {
 	// Read the binary file
 	data, err := os.ReadFile(filename)
 	if err != nil {
@@ -550,22 +561,22 @@ func LoadAndSetupBinary(c *cpu.CPU, filename string, startAddr int) (int, error)
 	}
 
 	// Check if the binary will fit in memory
-	if int(startAddr)+len(data) > len(c.Memory) {
+	if int(startAddr)+len(data) > len(mem) {
 		return 0, fmt.Errorf("binary file too large for available memory")
 	}
 
 	// Copy binary data into CPU memory starting at 0xF000
 	for i, b := range data {
-		c.Memory[uint16(startAddr)+uint16(i)] = b
+		mem[uint16(startAddr)+uint16(i)] = b
 	}
 
 	// Set up reset vector at 0xFFFC-0xFFFD to point to 0xF000
-	c.Memory[0xFFFC] = 0x00 // Low byte
-	c.Memory[0xFFFD] = 0xF0 // High byte
+	mem[0xFFFC] = 0x00 // Low byte
+	mem[0xFFFD] = 0xF0 // High byte
 
 	// Set up IRQ vector at 0xFFFE-0xFFFF to point to 0xF5A4
-	c.Memory[0xFFFE] = 0xA4 // Low byte
-	c.Memory[0xFFFF] = 0xF5 // High byte
+	mem[0xFFFE] = 0xA4 // Low byte
+	mem[0xFFFF] = 0xF5 // High byte
 
 	// Set the Program Counter to the reset vector location
 	c.PC = uint16(startAddr)
@@ -590,13 +601,14 @@ func main() {
 	}
 
 	// Create and initialize CPU
-	c := cpu.NewCPU()
-	_, err = LoadAndSetupBinary(c, *inputFile, int(startAddrInt))
+	memory := &Memory{}
+	c := cpu.NewCPU(memory)
+	_, err = LoadAndSetupBinary(c, memory, *inputFile, int(startAddrInt))
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return
 	}
-	p := tea.NewProgram(NewMonitor(c))
+	p := tea.NewProgram(NewMonitor(c, memory))
 	if err := p.Start(); err != nil {
 		fmt.Printf("Error running program: %v", err)
 	}

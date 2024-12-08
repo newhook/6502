@@ -7,7 +7,7 @@ import (
 
 func TestLDAImmediate(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name    string
@@ -67,7 +67,7 @@ func TestLDAImmediate(t *testing.T) {
 
 func TestLDAZeroPage(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name   string
@@ -106,7 +106,7 @@ func TestLDAZeroPage(t *testing.T) {
 
 func TestLDAZeroPageX(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name   string
@@ -151,7 +151,7 @@ func TestLDAZeroPageX(t *testing.T) {
 
 func TestLDAAbsolute(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name   string
@@ -185,7 +185,7 @@ func TestLDAAbsolute(t *testing.T) {
 
 func TestLDAAbsoluteX(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name     string
@@ -231,7 +231,7 @@ func TestLDAAbsoluteX(t *testing.T) {
 
 func TestLDAAbsoluteY(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name     string
@@ -277,7 +277,7 @@ func TestLDAAbsoluteY(t *testing.T) {
 
 func TestLDAIndirectX(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name   string
@@ -330,7 +330,7 @@ func TestLDAIndirectX(t *testing.T) {
 
 func TestLDAIndirectY(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name      string

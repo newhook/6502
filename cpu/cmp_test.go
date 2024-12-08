@@ -52,7 +52,7 @@ func TestCMP(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cpu := NewCPU()
+			cpu := NewCPUAndMemory()
 			cpu.A = tt.accumulator
 
 			// Test immediate mode
@@ -71,14 +71,14 @@ func TestCMPAddressingModes(t *testing.T) {
 	tests := []struct {
 		name       string
 		opcode     uint8
-		setupMem   func(*CPU, uint8)
+		setupMem   func(*CPUAndMemory, uint8)
 		cycles     uint8
 		extraCycle bool
 	}{
 		{
 			name:   "CMP Immediate",
 			opcode: CMP_IMM,
-			setupMem: func(c *CPU, value uint8) {
+			setupMem: func(c *CPUAndMemory, value uint8) {
 				c.Memory[0] = CMP_IMM
 				c.Memory[1] = value
 			},
@@ -87,7 +87,7 @@ func TestCMPAddressingModes(t *testing.T) {
 		{
 			name:   "CMP Zero Page",
 			opcode: CMP_ZP,
-			setupMem: func(c *CPU, value uint8) {
+			setupMem: func(c *CPUAndMemory, value uint8) {
 				c.Memory[0] = CMP_ZP
 				c.Memory[1] = 0x42 // Zero page address
 				c.Memory[0x42] = value
@@ -97,7 +97,7 @@ func TestCMPAddressingModes(t *testing.T) {
 		{
 			name:   "CMP Zero Page,X",
 			opcode: CMP_ZPX,
-			setupMem: func(c *CPU, value uint8) {
+			setupMem: func(c *CPUAndMemory, value uint8) {
 				c.Memory[0] = CMP_ZPX
 				c.Memory[1] = 0x42     // Zero page address
 				c.X = 0x01             // X offset
@@ -108,7 +108,7 @@ func TestCMPAddressingModes(t *testing.T) {
 		{
 			name:   "CMP Absolute",
 			opcode: CMP_ABS,
-			setupMem: func(c *CPU, value uint8) {
+			setupMem: func(c *CPUAndMemory, value uint8) {
 				c.Memory[0] = CMP_ABS
 				c.Memory[1] = 0x80 // Low byte of address
 				c.Memory[2] = 0x12 // High byte of address
@@ -119,7 +119,7 @@ func TestCMPAddressingModes(t *testing.T) {
 		{
 			name:   "CMP Absolute,X (no page cross)",
 			opcode: CMP_ABX,
-			setupMem: func(c *CPU, value uint8) {
+			setupMem: func(c *CPUAndMemory, value uint8) {
 				c.Memory[0] = CMP_ABX
 				c.Memory[1] = 0x80 // Low byte of address
 				c.Memory[2] = 0x12 // High byte of address
@@ -131,7 +131,7 @@ func TestCMPAddressingModes(t *testing.T) {
 		{
 			name:   "CMP Absolute,X (with page cross)",
 			opcode: CMP_ABX,
-			setupMem: func(c *CPU, value uint8) {
+			setupMem: func(c *CPUAndMemory, value uint8) {
 				c.Memory[0] = CMP_ABX
 				c.Memory[1] = 0xFF // Low byte of address
 				c.Memory[2] = 0x12 // High byte of address
@@ -144,7 +144,7 @@ func TestCMPAddressingModes(t *testing.T) {
 		{
 			name:   "CMP Absolute,Y (no page cross)",
 			opcode: CMP_ABY,
-			setupMem: func(c *CPU, value uint8) {
+			setupMem: func(c *CPUAndMemory, value uint8) {
 				c.Memory[0] = CMP_ABY
 				c.Memory[1] = 0x80 // Low byte of address
 				c.Memory[2] = 0x12 // High byte of address
@@ -156,7 +156,7 @@ func TestCMPAddressingModes(t *testing.T) {
 		{
 			name:   "CMP Absolute,Y (with page cross)",
 			opcode: CMP_ABY,
-			setupMem: func(c *CPU, value uint8) {
+			setupMem: func(c *CPUAndMemory, value uint8) {
 				c.Memory[0] = CMP_ABY
 				c.Memory[1] = 0xFF // Low byte of address
 				c.Memory[2] = 0x12 // High byte of address
@@ -169,7 +169,7 @@ func TestCMPAddressingModes(t *testing.T) {
 		{
 			name:   "CMP Indirect,X",
 			opcode: CMP_INX,
-			setupMem: func(c *CPU, value uint8) {
+			setupMem: func(c *CPUAndMemory, value uint8) {
 				c.Memory[0] = CMP_INX
 				c.Memory[1] = 0x20 // Zero page address
 				c.X = 0x01
@@ -183,7 +183,7 @@ func TestCMPAddressingModes(t *testing.T) {
 		{
 			name:   "CMP Indirect,Y (no page cross)",
 			opcode: CMP_INY,
-			setupMem: func(c *CPU, value uint8) {
+			setupMem: func(c *CPUAndMemory, value uint8) {
 				c.Memory[0] = CMP_INY
 				c.Memory[1] = 0x20 // Zero page address
 				// Indirect address stored at 0x20
@@ -197,7 +197,7 @@ func TestCMPAddressingModes(t *testing.T) {
 		{
 			name:   "CMP Indirect,Y (with page cross)",
 			opcode: CMP_INY,
-			setupMem: func(c *CPU, value uint8) {
+			setupMem: func(c *CPUAndMemory, value uint8) {
 				c.Memory[0] = CMP_INY
 				c.Memory[1] = 0x20 // Zero page address
 				// Indirect address stored at 0x20
@@ -234,7 +234,7 @@ func TestCMPAddressingModes(t *testing.T) {
 				"M" + fmt.Sprintf("%x", cv.value)
 
 			t.Run(testName, func(t *testing.T) {
-				cpu := NewCPU()
+				cpu := NewCPUAndMemory()
 				cpu.A = cv.accumulator
 				cpu.PC = 1
 				tt.setupMem(cpu, cv.value)

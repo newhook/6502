@@ -65,7 +65,7 @@ func TestSBC(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cpu := NewCPU()
+			cpu := NewCPUAndMemory()
 			cpu.A = tt.initial
 			if tt.initialCarry {
 				cpu.P |= FlagC
@@ -91,14 +91,14 @@ func TestSBCAddressingModes(t *testing.T) {
 	tests := []struct {
 		name     string
 		opcode   uint8
-		setup    func(*CPU)
+		setup    func(*CPUAndMemory)
 		cycles   uint8
 		expected uint8
 	}{
 		{
 			name:   "Zero Page",
 			opcode: SBC_ZP,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0] = 0x42    // Zero page address
 				c.Memory[0x42] = 0x10 // Value to subtract
 				c.A = 0x50            // Initial value
@@ -110,7 +110,7 @@ func TestSBCAddressingModes(t *testing.T) {
 		{
 			name:   "Zero Page,X",
 			opcode: SBC_ZPX,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0] = 0x42    // Zero page address
 				c.X = 0x02            // X offset
 				c.Memory[0x44] = 0x10 // Value to subtract at (0x42 + 0x02)
@@ -125,7 +125,7 @@ func TestSBCAddressingModes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cpu := NewCPU()
+			cpu := NewCPUAndMemory()
 			tt.setup(cpu)
 
 			cycles := cpu.execute(tt.opcode)

@@ -7,19 +7,19 @@ import (
 
 func TestSTXInstructions(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name   string
 		opcode uint8
-		setup  func(*CPU)
+		setup  func(*CPUAndMemory)
 		addr   uint16
 		cycles uint8
 	}{
 		{
 			name:   "STX Zero Page",
 			opcode: STX_ZP,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x42 // Zero page address
 				c.X = 0x37              // Value to store
 			},
@@ -29,7 +29,7 @@ func TestSTXInstructions(t *testing.T) {
 		{
 			name:   "STX Zero Page,Y",
 			opcode: STX_ZPY,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x42 // Zero page address
 				c.Y = 0x02              // Y offset
 				c.X = 0x37              // Value to store
@@ -40,7 +40,7 @@ func TestSTXInstructions(t *testing.T) {
 		{
 			name:   "STX Absolute",
 			opcode: STX_ABS,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x34 // Low byte
 				c.Memory[0x0202] = 0x12 // High byte
 				c.X = 0x37              // Value to store

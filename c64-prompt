@@ -1,0 +1,35 @@
+I'm writing a c64 emulator with golang.
+
+All unit tests are to use testify.
+
+I have an existing 6502 emulator. The CPU type is as follows contained in
+the cpu package.
+
+type CPU struct {
+    // Registers
+    A  uint8  // Accumulator
+    X  uint8  // X index register
+    Y  uint8  // Y index register
+    PC uint16 // Program Counter
+    SP uint8  // Stack Pointer
+    P  uint8  // Status Register (Flags)
+
+    // Memory
+    Memory [65536]uint8
+}
+
+The register flags are defined as:
+
+const (
+	FlagC uint8 = 0x01 // Carry
+	FlagZ uint8 = 0x02 // Zero
+	FlagI uint8 = 0x04 // Interrupt Disable
+	FlagD uint8 = 0x08 // Decimal Mode
+	FlagB uint8 = 0x10 // Break Command
+	FlagV uint8 = 0x40 // Overflow
+	FlagN uint8 = 0x80 // Negative
+)
+
+To create a new CPU type use the NewCPU() function.
+
+To step the CPU func (c *CPU) Step() uint8, which returns the number of cycles the opcode took.

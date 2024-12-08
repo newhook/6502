@@ -7,13 +7,13 @@ import (
 
 func TestStackOperations(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name         string
 		opcode       uint8
-		setup        func(*CPU)
-		verify       func(*CPU) bool
+		setup        func(*CPUAndMemory)
+		verify       func(*CPUAndMemory) bool
 		cycles       uint8
 		expectZ      bool
 		expectN      bool
@@ -22,11 +22,11 @@ func TestStackOperations(t *testing.T) {
 		{
 			name:   "PHA - Push zero accumulator",
 			opcode: PHA,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0x00
 				c.SP = 0xFF
 			},
-			verify: func(c *CPU) bool {
+			verify: func(c *CPUAndMemory) bool {
 				return c.Memory[0x01FF] == 0x00 && c.SP == 0xFE
 			},
 			cycles:       3,
@@ -35,11 +35,11 @@ func TestStackOperations(t *testing.T) {
 		{
 			name:   "PHA - Push non-zero accumulator",
 			opcode: PHA,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.A = 0x42
 				c.SP = 0xFF
 			},
-			verify: func(c *CPU) bool {
+			verify: func(c *CPUAndMemory) bool {
 				return c.Memory[0x01FF] == 0x42 && c.SP == 0xFE
 			},
 			cycles:       3,
@@ -48,11 +48,11 @@ func TestStackOperations(t *testing.T) {
 		{
 			name:   "PHP - Push processor status",
 			opcode: PHP,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.P = FlagC | FlagZ // Set some flags
 				c.SP = 0xFF
 			},
-			verify: func(c *CPU) bool {
+			verify: func(c *CPUAndMemory) bool {
 				// PHP always sets the B flag in the pushed value
 				return c.Memory[0x01FF] == (FlagC|FlagZ|FlagB) && c.SP == 0xFE
 			},
@@ -62,11 +62,11 @@ func TestStackOperations(t *testing.T) {
 		{
 			name:   "PLA - Pull zero value",
 			opcode: PLA,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.SP = 0xFE
 				c.Memory[0x01FF] = 0x00
 			},
-			verify: func(c *CPU) bool {
+			verify: func(c *CPUAndMemory) bool {
 				return c.A == 0x00 && c.SP == 0xFF
 			},
 			cycles:       4,
@@ -77,11 +77,11 @@ func TestStackOperations(t *testing.T) {
 		{
 			name:   "PLA - Pull negative value",
 			opcode: PLA,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.SP = 0xFE
 				c.Memory[0x01FF] = 0x80
 			},
-			verify: func(c *CPU) bool {
+			verify: func(c *CPUAndMemory) bool {
 				return c.A == 0x80 && c.SP == 0xFF
 			},
 			cycles:       4,
@@ -92,12 +92,12 @@ func TestStackOperations(t *testing.T) {
 		{
 			name:   "PLP - Pull processor status",
 			opcode: PLP,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.SP = 0xFE
 				c.Memory[0x01FF] = FlagC | FlagZ // Value on stack
 				c.P = FlagB | FlagN              // Current flags with B set
 			},
-			verify: func(c *CPU) bool {
+			verify: func(c *CPUAndMemory) bool {
 				// PLP should preserve the current B flag status
 				return (c.P & ^uint8(FlagB)) == (FlagC|FlagZ) &&
 					(c.P&FlagB) != 0 &&
@@ -139,46 +139,46 @@ func TestStackOperations(t *testing.T) {
 
 func TestStackEdgeCases(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name   string
-		setup  func(*CPU)
-		verify func(*CPU) bool
+		setup  func(*CPUAndMemory)
+		verify func(*CPUAndMemory) bool
 	}{
 		{
 			name: "Stack wrap-around",
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.SP = 0x00
 				c.A = 0x42
 				c.Memory[0x0200] = PHA
 				c.Memory[0x0201] = PLA
 			},
-			verify: func(c *CPU) bool {
+			verify: func(c *CPUAndMemory) bool {
 				return c.SP == 0x00 && c.A == 0x42
 			},
 		},
 		{
 			name: "Push and pull preserves value",
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.SP = 0xFF
 				c.A = 0x42
 				c.Memory[0x0200] = PHA
 				c.Memory[0x0201] = PLA
 			},
-			verify: func(c *CPU) bool {
+			verify: func(c *CPUAndMemory) bool {
 				return c.A == 0x42 && c.SP == 0xFF
 			},
 		},
 		{
 			name: "PHP/PLP preserves B flag",
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.SP = 0xFF
 				c.P = FlagB | FlagC
 				c.Memory[0x0200] = PHP
 				c.Memory[0x0201] = PLP
 			},
-			verify: func(c *CPU) bool {
+			verify: func(c *CPUAndMemory) bool {
 				return (c.P&FlagB) != 0 && (c.P&FlagC) != 0
 			},
 		},

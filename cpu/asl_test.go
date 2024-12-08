@@ -10,69 +10,69 @@ func TestASL(t *testing.T) {
 	tests := []struct {
 		name        string
 		opcode      uint8
-		setupMem    func(*CPU, uint8)
+		setupMem    func(*CPUAndMemory, uint8)
 		cycles      uint8
 		accumulator bool
-		memCheck    func(*CPU, uint8) uint16 // Returns address to check
+		memCheck    func(*CPUAndMemory, uint8) uint16 // Returns address to check
 	}{
 		{
 			name:   "ASL Accumulator",
 			opcode: ASL_ACC,
-			setupMem: func(c *CPU, value uint8) {
+			setupMem: func(c *CPUAndMemory, value uint8) {
 				c.Memory[0] = ASL_ACC
 				c.A = value
 			},
 			cycles:      2,
 			accumulator: true,
-			memCheck: func(c *CPU, _ uint8) uint16 {
+			memCheck: func(c *CPUAndMemory, _ uint8) uint16 {
 				return 0 // Not used for accumulator mode
 			},
 		},
 		{
 			name:   "ASL Zero Page",
 			opcode: ASL_ZP,
-			setupMem: func(c *CPU, value uint8) {
+			setupMem: func(c *CPUAndMemory, value uint8) {
 				c.Memory[0] = ASL_ZP
 				c.Memory[1] = 0x42 // Zero page address
 				c.Memory[0x42] = value
 			},
 			cycles: 5,
-			memCheck: func(c *CPU, _ uint8) uint16 {
+			memCheck: func(c *CPUAndMemory, _ uint8) uint16 {
 				return 0x42
 			},
 		},
 		{
 			name:   "ASL Zero Page,X",
 			opcode: ASL_ZPX,
-			setupMem: func(c *CPU, value uint8) {
+			setupMem: func(c *CPUAndMemory, value uint8) {
 				c.Memory[0] = ASL_ZPX
 				c.Memory[1] = 0x42     // Zero page address
 				c.X = 0x01             // X offset
 				c.Memory[0x43] = value // 0x42 + 0x01 = 0x43
 			},
 			cycles: 6,
-			memCheck: func(c *CPU, _ uint8) uint16 {
+			memCheck: func(c *CPUAndMemory, _ uint8) uint16 {
 				return 0x43
 			},
 		},
 		{
 			name:   "ASL Absolute",
 			opcode: ASL_ABS,
-			setupMem: func(c *CPU, value uint8) {
+			setupMem: func(c *CPUAndMemory, value uint8) {
 				c.Memory[0] = ASL_ABS
 				c.Memory[1] = 0x80 // Low byte of address
 				c.Memory[2] = 0x12 // High byte of address
 				c.Memory[0x1280] = value
 			},
 			cycles: 6,
-			memCheck: func(c *CPU, _ uint8) uint16 {
+			memCheck: func(c *CPUAndMemory, _ uint8) uint16 {
 				return 0x1280
 			},
 		},
 		{
 			name:   "ASL Absolute,X",
 			opcode: ASL_ABX,
-			setupMem: func(c *CPU, value uint8) {
+			setupMem: func(c *CPUAndMemory, value uint8) {
 				c.Memory[0] = ASL_ABX
 				c.Memory[1] = 0x80 // Low byte of address
 				c.Memory[2] = 0x12 // High byte of address
@@ -80,7 +80,7 @@ func TestASL(t *testing.T) {
 				c.Memory[0x1281] = value // 0x1280 + 0x01
 			},
 			cycles: 7,
-			memCheck: func(c *CPU, _ uint8) uint16 {
+			memCheck: func(c *CPUAndMemory, _ uint8) uint16 {
 				return 0x1281
 			},
 		},
@@ -108,7 +108,7 @@ func TestASL(t *testing.T) {
 				fmt.Sprintf("%x", tv.expected)
 
 			t.Run(testName, func(t *testing.T) {
-				cpu := NewCPU()
+				cpu := NewCPUAndMemory()
 				cpu.PC = 1
 
 				tt.setupMem(cpu, tv.initial)

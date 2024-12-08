@@ -217,8 +217,8 @@ type CPU struct {
 	SP uint8  // Stack Pointer
 	P  uint8  // Status Register (Flags)
 
-	// Memory
-	Memory [65536]uint8
+	// Memory interface instead of direct array
+	Bus MemoryBus
 }
 
 // Status flag bits
@@ -232,20 +232,37 @@ const (
 	FlagN uint8 = 0x80 // Negative
 )
 
+type MemoryBus interface {
+	Read(address uint16) uint8
+	Write(address uint16, value uint8)
+}
+
 // NewCPU creates a new 6502 CPU instance
-func NewCPU() *CPU {
+func NewCPU(b MemoryBus) *CPU {
 	return &CPU{
-		SP: 0xFF, // Stack pointer starts at top of stack
-		P:  0x24, // IRQ disabled by default
+		SP:  0xFF, // Stack pointer starts at top of stack
+		P:   0x24, // IRQ disabled by default
+		Bus: b,
 	}
+}
+
+// Read reads a byte from memory
+func (c *CPU) Read(address uint16) uint8 {
+	return c.Bus.Read(address)
+}
+
+// Write writes a byte to memory
+func (c *CPU) Write(address uint16, value uint8) {
+	c.Bus.Write(address, value)
 }
 
 // Reset resets the CPU to its initial state
 func (c *CPU) Reset() {
 	// Read reset vector at 0xFFFC-0xFFFD
-	lowByte := uint16(c.Memory[0xFFFC])
-	highByte := uint16(c.Memory[0xFFFD])
-	c.PC = (highByte << 8) | lowByte
+	// Read reset vector from 0xFFFC
+	pcl := c.Read(0xFFFC)
+	pch := c.Read(0xFFFD)
+	c.PC = uint16(pcl) | uint16(pch)<<8
 
 	c.SP = 0xFF
 	c.P = 0x24
@@ -257,7 +274,7 @@ func (c *CPU) Reset() {
 // Step executes one instruction and returns number of cycles used
 func (c *CPU) Step() uint8 {
 	// Fetch
-	opcode := c.Memory[c.PC]
+	opcode := c.Read(c.PC)
 	c.PC++
 
 	// Decode and Execute
@@ -330,9 +347,9 @@ func (c *CPU) execute(opcode uint8) uint8 {
 		return 3
 
 	case LDX_ZPY: // Note: LDX uses Y register for indexing!
-		zeroPageAddr := c.Memory[c.PC]
+		zeroPageAddr := c.Read(c.PC)
 		c.PC++
-		c.X = c.Memory[(zeroPageAddr+c.Y)&0xFF]
+		c.X = c.Read(uint16((zeroPageAddr + c.Y) & 0xFF))
 		c.updateZN(c.X)
 		return 4
 
@@ -343,9 +360,9 @@ func (c *CPU) execute(opcode uint8) uint8 {
 
 	case LDX_ABY: // Note: LDX uses Y register for indexing!
 		value, pageCrossed := func() (uint8, bool) {
-			lowByte := uint16(c.Memory[c.PC])
+			lowByte := uint16(c.Read(c.PC))
 			c.PC++
-			highByte := uint16(c.Memory[c.PC])
+			highByte := uint16(c.Read(c.PC))
 			c.PC++
 			addr := (highByte << 8) | lowByte
 			finalAddr := addr + uint16(c.Y)
@@ -353,7 +370,7 @@ func (c *CPU) execute(opcode uint8) uint8 {
 			// Check if page boundary was crossed
 			pageCrossed := (addr & 0xFF00) != (finalAddr & 0xFF00)
 
-			return c.Memory[finalAddr], pageCrossed
+			return c.Read(uint16(finalAddr)), pageCrossed
 		}()
 
 		c.X = value
@@ -374,9 +391,9 @@ func (c *CPU) execute(opcode uint8) uint8 {
 		return 3
 
 	case LDY_ZPX: // Note: LDY uses X register for indexing!
-		zeroPageAddr := c.Memory[c.PC]
+		zeroPageAddr := c.Read(c.PC)
 		c.PC++
-		c.Y = c.Memory[(zeroPageAddr+c.X)&0xFF]
+		c.Y = c.Read(uint16((zeroPageAddr + c.X) & 0xFF))
 		c.updateZN(c.Y)
 		return 4
 
@@ -387,9 +404,9 @@ func (c *CPU) execute(opcode uint8) uint8 {
 
 	case LDY_ABX: // Note: LDY uses X register for indexing!
 		value, pageCrossed := func() (uint8, bool) {
-			lowByte := uint16(c.Memory[c.PC])
+			lowByte := uint16(c.Read(c.PC))
 			c.PC++
-			highByte := uint16(c.Memory[c.PC])
+			highByte := uint16(c.Read(c.PC))
 			c.PC++
 			addr := (highByte << 8) | lowByte
 			finalAddr := addr + uint16(c.X)
@@ -397,7 +414,7 @@ func (c *CPU) execute(opcode uint8) uint8 {
 			// Check if page boundary was crossed
 			pageCrossed := (addr & 0xFF00) != (finalAddr & 0xFF00)
 
-			return c.Memory[finalAddr], pageCrossed
+			return c.Read(uint16(finalAddr)), pageCrossed
 		}()
 
 		c.Y = value
@@ -409,71 +426,71 @@ func (c *CPU) execute(opcode uint8) uint8 {
 
 	case STA_ZP:
 		addr := c.readImmediate() // Get zero page address
-		c.Memory[addr] = c.A
+		c.Write(uint16(addr), c.A)
 		return 3
 
 	case STA_ZPX:
 		addr := (c.readImmediate() + c.X) & 0xFF
-		c.Memory[addr] = c.A
+		c.Write(uint16(addr), c.A)
 		return 4
 
 	case STA_ABS:
 		addr := c.readAbsoluteAddress()
-		c.Memory[addr] = c.A
+		c.Write(uint16(addr), c.A)
 		return 4
 
 	case STA_ABX:
 		addr := c.readAbsoluteAddress() + uint16(c.X)
-		c.Memory[addr] = c.A
+		c.Write(uint16(addr), c.A)
 		return 5
 
 	case STA_ABY:
 		addr := c.readAbsoluteAddress() + uint16(c.Y)
-		c.Memory[addr] = c.A
+		c.Write(uint16(addr), c.A)
 		return 5
 
 	case STA_INX:
 		zeroPageAddr := (c.readImmediate() + c.X) & 0xFF
 		addr := c.readIndirectAddress(zeroPageAddr)
-		c.Memory[addr] = c.A
+		c.Write(uint16(addr), c.A)
 		return 6
 
 	case STA_INY:
 		zeroPageAddr := c.readImmediate()
 		addr := c.readIndirectAddress(zeroPageAddr) + uint16(c.Y)
-		c.Memory[addr] = c.A
+		c.Write(uint16(addr), c.A)
 		return 6
 
 	// STX - Store X Register
 	case STX_ZP:
 		addr := c.readImmediate()
-		c.Memory[addr] = c.X
+		c.Write(uint16(addr), c.X)
 		return 3
 
 	case STX_ZPY:
 		addr := (c.readImmediate() + c.Y) & 0xFF
-		c.Memory[addr] = c.X
+		c.Write(uint16(addr), c.X)
 		return 4
 
 	case STX_ABS:
 		addr := c.readAbsoluteAddress()
-		c.Memory[addr] = c.X
+		c.Write(uint16(addr), c.X)
 		return 4
 
 	// STY - Store Y Register
 	case STY_ZP:
 		addr := c.readImmediate()
-		c.Memory[addr] = c.Y
+		c.Write(uint16(addr), c.Y)
 		return 3
 
 	case STY_ZPX:
 		addr := (c.readImmediate() + c.X) & 0xFF
-		c.Memory[addr] = c.Y
+		c.Write(uint16(addr), c.Y)
 		return 4
 
 	case STY_ABS:
 		addr := c.readAbsoluteAddress()
-		c.Memory[addr] = c.Y
+		c.Write(uint16(addr), c.Y)
 		return 4
 
 		// Transfer Accumulator to X
@@ -953,20 +970,20 @@ func (c *CPU) execute(opcode uint8) uint8 {
 		return 2
 	case ASL_ZP:
 		addr := uint16(c.readImmediate())
-		c.Memory[addr] = c.asl(c.Memory[addr])
+		c.Write(uint16(addr), c.asl(c.Read(uint16(addr))))
 		return 5
 	case ASL_ZPX:
 		addr := uint16(c.readImmediate() + c.X)
-		c.Memory[addr] = c.asl(c.Memory[addr])
+		c.Write(uint16(addr), c.asl(c.Read(uint16(addr))))
 		return 6
 	case ASL_ABS:
 		addr := c.readAbsoluteAddress()
-		c.Memory[addr] = c.asl(c.Memory[addr])
+		c.Write(uint16(addr), c.asl(c.Read(uint16(addr))))
 		return 6
 	case ASL_ABX:
 		base := c.readAbsoluteAddress()
 		addr := base + uint16(c.X)
-		c.Memory[addr] = c.asl(c.Memory[addr])
+		c.Write(uint16(addr), c.asl(c.Read(uint16(addr))))
 		return 7
 
 	case LSR_ACC:
@@ -974,20 +991,20 @@ func (c *CPU) execute(opcode uint8) uint8 {
 		return 2
 	case LSR_ZP:
 		addr := uint16(c.readImmediate())
-		c.Memory[addr] = c.lsr(c.Memory[addr])
+		c.Write(uint16(addr), c.lsr(c.Read(uint16(addr))))
 		return 5
 	case LSR_ZPX:
 		addr := uint16(c.readImmediate() + c.X)
-		c.Memory[addr] = c.lsr(c.Memory[addr])
+		c.Write(uint16(addr), c.lsr(c.Read(uint16(addr))))
 		return 6
 	case LSR_ABS:
 		addr := c.readAbsoluteAddress()
-		c.Memory[addr] = c.lsr(c.Memory[addr])
+		c.Write(uint16(addr), c.lsr(c.Read(uint16(addr))))
 		return 6
 	case LSR_ABX:
 		base := c.readAbsoluteAddress()
 		addr := base + uint16(c.X)
-		c.Memory[addr] = c.lsr(c.Memory[addr])
+		c.Write(uint16(addr), c.lsr(c.Read(uint16(addr))))
 		return 7
 
 		// ROL cases
@@ -996,20 +1013,20 @@ func (c *CPU) execute(opcode uint8) uint8 {
 		return 2
 	case ROL_ZP:
 		addr := uint16(c.readImmediate())
-		c.Memory[addr] = c.rol(c.Memory[addr])
+		c.Write(uint16(addr), c.rol(c.Read(uint16(addr))))
 		return 5
 	case ROL_ZPX:
 		addr := uint16(c.readImmediate() + c.X)
-		c.Memory[addr] = c.rol(c.Memory[addr])
+		c.Write(uint16(addr), c.rol(c.Read(uint16(addr))))
 		return 6
 	case ROL_ABS:
 		addr := c.readAbsoluteAddress()
-		c.Memory[addr] = c.rol(c.Memory[addr])
+		c.Write(uint16(addr), c.rol(c.Read(uint16(addr))))
 		return 6
 	case ROL_ABX:
 		base := c.readAbsoluteAddress()
 		addr := base + uint16(c.X)
-		c.Memory[addr] = c.rol(c.Memory[addr])
+		c.Write(uint16(addr), c.rol(c.Read(uint16(addr))))
 		return 7
 
 	// ROR cases
@@ -1018,20 +1035,20 @@ func (c *CPU) execute(opcode uint8) uint8 {
 		return 2
 	case ROR_ZP:
 		addr := uint16(c.readImmediate())
-		c.Memory[addr] = c.ror(c.Memory[addr])
+		c.Write(uint16(addr), c.ror(c.Read(uint16(addr))))
 		return 5
 	case ROR_ZPX:
 		addr := uint16(c.readImmediate() + c.X)
-		c.Memory[addr] = c.ror(c.Memory[addr])
+		c.Write(uint16(addr), c.ror(c.Read(uint16(addr))))
 		return 6
 	case ROR_ABS:
 		addr := c.readAbsoluteAddress()
-		c.Memory[addr] = c.ror(c.Memory[addr])
+		c.Write(uint16(addr), c.ror(c.Read(uint16(addr))))
 		return 6
 	case ROR_ABX:
 		base := c.readAbsoluteAddress()
 		addr := base + uint16(c.X)
-		c.Memory[addr] = c.ror(c.Memory[addr])
+		c.Write(uint16(addr), c.ror(c.Read(uint16(addr))))
 		return 7
 
 	case JMP_ABS:
@@ -1042,11 +1059,11 @@ func (c *CPU) execute(opcode uint8) uint8 {
 		addr := c.readAbsoluteAddress()
 		// Handle 6502 indirect jump bug at page boundary
 		if addr&0xFF == 0xFF {
-			low := uint16(c.Memory[addr])
-			high := uint16(c.Memory[addr&0xFF00])
+			low := uint16(c.Read(uint16(addr)))
+			high := uint16(c.Read(addr & 0xFF00))
 			c.PC = (high << 8) | low
 		} else {
-			c.PC = uint16(c.Memory[addr]) | uint16(c.Memory[addr+1])<<8
+			c.PC = uint16(c.Read(uint16(addr))) | uint16(c.Read(addr+1))<<8
 		}
 		return 5
 
@@ -1106,7 +1123,7 @@ func (c *CPU) execute(opcode uint8) uint8 {
 		c.push(c.P | FlagB) // Push status with B flag set
 		c.P |= FlagI        // Set interrupt disable flag
 		// Load IRQ vector
-		c.PC = uint16(c.Memory[0xFFFE]) | uint16(c.Memory[0xFFFF])<<8
+		c.PC = uint16(c.Read(0xFFFE)) | uint16(c.Read(0xFFFF))<<8
 		return 7
 
 	case NOP:
@@ -1210,17 +1227,17 @@ func (c *CPU) asl(value uint8) uint8 {
 
 // dec decrements the value at the specified memory address
 func (c *CPU) dec(addr uint16) {
-	value := c.Memory[addr]
+	value := c.Read(uint16(addr))
 	result := value - 1
-	c.Memory[addr] = result
+	c.Write(uint16(addr), result)
 	c.updateZN(result)
 }
 
 // inc increments the value at the specified memory address
 func (c *CPU) inc(addr uint16) {
-	value := c.Memory[addr]
+	value := c.Read(uint16(addr))
 	result := value + 1
-	c.Memory[addr] = result
+	c.Write(uint16(addr), result)
 	c.updateZN(result)
 }
 
@@ -1346,36 +1363,36 @@ func (c *CPU) adc(value uint8) {
 }
 
 func (c *CPU) readImmediate() uint8 {
-	value := c.Memory[c.PC]
+	value := c.Read(c.PC)
 	c.PC++
 	return value
 }
 
 func (c *CPU) readZeroPage() uint8 {
-	addr := c.Memory[c.PC]
+	addr := c.Read(c.PC)
 	c.PC++
-	return c.Memory[addr]
+	return c.Read(uint16(addr))
 }
 
 func (c *CPU) readZeroPageX() uint8 {
-	addr := c.Memory[c.PC]
+	addr := c.Read(c.PC)
 	c.PC++
-	return c.Memory[(addr+c.X)&0xFF] // & 0xFF ensures zero-page wrap-around
+	return c.Read(uint16((addr + c.X) & 0xFF)) // & 0xFF ensures zero-page wrap-around
 }
 
 func (c *CPU) readAbsolute() uint8 {
-	lowByte := uint16(c.Memory[c.PC])
+	lowByte := uint16(c.Read(c.PC))
 	c.PC++
-	highByte := uint16(c.Memory[c.PC])
+	highByte := uint16(c.Read(c.PC))
 	c.PC++
 	addr := (highByte << 8) | lowByte
-	return c.Memory[addr]
+	return c.Read(uint16(addr))
 }
 
 func (c *CPU) readAbsoluteX() (uint8, bool) {
-	lowByte := uint16(c.Memory[c.PC])
+	lowByte := uint16(c.Read(c.PC))
 	c.PC++
-	highByte := uint16(c.Memory[c.PC])
+	highByte := uint16(c.Read(c.PC))
 	c.PC++
 	addr := (highByte << 8) | lowByte
 	finalAddr := addr + uint16(c.X)
@@ -1383,71 +1400,71 @@ func (c *CPU) readAbsoluteX() (uint8, bool) {
 	// Return true if page boundary crossed (extra cycle)
 	pageCrossed := (addr & 0xFF00) != (finalAddr & 0xFF00)
 
-	return c.Memory[finalAddr], pageCrossed
+	return c.Read(uint16(finalAddr)), pageCrossed
 }
 
 func (c *CPU) readAbsoluteY() (uint8, bool) {
-	lowByte := uint16(c.Memory[c.PC])
+	lowByte := uint16(c.Read(c.PC))
 	c.PC++
-	highByte := uint16(c.Memory[c.PC])
+	highByte := uint16(c.Read(c.PC))
 	c.PC++
 	addr := (highByte << 8) | lowByte
 	finalAddr := addr + uint16(c.Y)
 
 	pageCrossed := (addr & 0xFF00) != (finalAddr & 0xFF00)
 
-	return c.Memory[finalAddr], pageCrossed
+	return c.Read(uint16(finalAddr)), pageCrossed
 }
 
 func (c *CPU) readIndirectX() uint8 {
-	zeroPageAddr := c.Memory[c.PC]
+	zeroPageAddr := c.Read(c.PC)
 	c.PC++
 
 	// Add X register with wrap-around
 	effectiveAddr := (zeroPageAddr + c.X) & 0xFF
 
 	// Read effective address from zero page
-	lowByte := uint16(c.Memory[effectiveAddr])
-	highByte := uint16(c.Memory[(effectiveAddr+1)&0xFF])
+	lowByte := uint16(c.Read(uint16(effectiveAddr)))
+	highByte := uint16(c.Read(uint16(effectiveAddr+1) & 0xFF))
 
 	addr := (highByte << 8) | lowByte
-	return c.Memory[addr]
+	return c.Read(uint16(addr))
 }
 
 func (c *CPU) readIndirectY() (uint8, bool) {
-	zeroPageAddr := c.Memory[c.PC]
+	zeroPageAddr := c.Read(c.PC)
 	c.PC++
 
 	// Read address from zero page
-	lowByte := uint16(c.Memory[zeroPageAddr])
-	highByte := uint16(c.Memory[(zeroPageAddr+1)&0xFF])
+	lowByte := uint16(c.Read(uint16(zeroPageAddr)))
+	highByte := uint16(c.Read(uint16(zeroPageAddr+1) & 0xFF))
 
 	baseAddr := (highByte << 8) | lowByte
 	finalAddr := baseAddr + uint16(c.Y)
 
 	pageCrossed := (baseAddr & 0xFF00) != (finalAddr & 0xFF00)
 
-	return c.Memory[finalAddr], pageCrossed
+	return c.Read(uint16(finalAddr)), pageCrossed
 }
 
 func (c *CPU) readAbsoluteAddress() uint16 {
-	lowByte := uint16(c.Memory[c.PC])
+	lowByte := uint16(c.Read(c.PC))
 	c.PC++
-	highByte := uint16(c.Memory[c.PC])
+	highByte := uint16(c.Read(c.PC))
 	c.PC++
 	return (highByte << 8) | lowByte
 }
 
 // Helper function to read indirect address
 func (c *CPU) readIndirectAddress(zeroPageAddr uint8) uint16 {
-	lowByte := uint16(c.Memory[zeroPageAddr])
-	highByte := uint16(c.Memory[(zeroPageAddr+1)&0xFF])
+	lowByte := uint16(c.Read(uint16(zeroPageAddr)))
+	highByte := uint16(c.Read(uint16((zeroPageAddr + 1) & 0xFF)))
 	return (highByte << 8) | lowByte
 }
 
 // Add helper functions for stack operations
 func (c *CPU) push(value uint8) {
-	c.Memory[0x0100|uint16(c.SP)] = value
+	c.Write(0x0100|uint16(c.SP), value)
 	c.SP--
 }
 
@@ -1468,7 +1485,7 @@ func (c *CPU) pull16() uint16 {
 
 func (c *CPU) pull() uint8 {
 	c.SP++
-	return c.Memory[0x0100|uint16(c.SP)]
+	return c.Read(uint16(0x0100 | uint16(c.SP)))
 }
 
 // updateZN updates Zero and Negative flags based on value
@@ -1484,4 +1501,27 @@ func (c *CPU) updateZN(value uint8) {
 	} else {
 		c.P &^= FlagN
 	}
+}
+
+type CPUAndMemory struct {
+	CPU
+	Memory [65536]uint8
+}
+
+func (c *CPUAndMemory) Read(address uint16) uint8 {
+	return c.Memory[address]
+}
+func (c *CPUAndMemory) Write(address uint16, value uint8) {
+	c.Memory[address] = value
+}
+
+func NewCPUAndMemory() *CPUAndMemory {
+	c := &CPUAndMemory{
+		CPU: CPU{
+			SP: 0xFF, // Stack pointer starts at top of stack
+			P:  0x24, // IRQ disabled by default
+		},
+	}
+	c.Bus = c
+	return c
 }

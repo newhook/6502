@@ -7,19 +7,19 @@ import (
 
 func TestSTAInstructions(t *testing.T) {
 	assert := assert.New(t)
-	cpu := NewCPU()
+	cpu := NewCPUAndMemory()
 
 	tests := []struct {
 		name   string
 		opcode uint8
-		setup  func(*CPU)
+		setup  func(*CPUAndMemory)
 		addr   uint16
 		cycles uint8
 	}{
 		{
 			name:   "STA Zero Page",
 			opcode: STA_ZP,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x42 // Zero page address
 				c.A = 0x37              // Value to store
 			},
@@ -29,7 +29,7 @@ func TestSTAInstructions(t *testing.T) {
 		{
 			name:   "STA Zero Page,X",
 			opcode: STA_ZPX,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x42 // Zero page address
 				c.X = 0x02              // X offset
 				c.A = 0x37              // Value to store
@@ -40,7 +40,7 @@ func TestSTAInstructions(t *testing.T) {
 		{
 			name:   "STA Absolute",
 			opcode: STA_ABS,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x34 // Low byte
 				c.Memory[0x0202] = 0x12 // High byte
 				c.A = 0x37              // Value to store
@@ -51,7 +51,7 @@ func TestSTAInstructions(t *testing.T) {
 		{
 			name:   "STA Absolute,X",
 			opcode: STA_ABX,
-			setup: func(c *CPU) {
+			setup: func(c *CPUAndMemory) {
 				c.Memory[0x0201] = 0x34 // Low byte
 				c.Memory[0x0202] = 0x12 // High byte
 				c.X = 0x02              // X offset

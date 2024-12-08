@@ -53,7 +53,7 @@ func TestRegisterIncDec(t *testing.T) {
 				string(expected)
 
 			t.Run(testName, func(t *testing.T) {
-				cpu := NewCPU()
+				cpu := NewCPUAndMemory()
 
 				// Set initial register value
 				if tt.isX {
