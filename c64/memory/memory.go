@@ -169,3 +169,15 @@ func (m *Manager) DMA(address uint16, data []uint8) {
 		m.Write(address+uint16(i), value)
 	}
 }
+
+// Map maps ROMs and RAM into the CPU's address space
+func (m *Manager) Map() {
+	// Map Basic ROM
+	copy(m.ram[BASIC_ROM_START:], m.basic[:])
+
+	// Map Kernal ROM
+	copy(m.ram[KERNAL_ROM_START:], m.kernal[:])
+
+	// Map Character ROM
+	copy(m.ram[IO_START:], m.char[:])
+}

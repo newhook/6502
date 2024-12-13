@@ -158,14 +158,6 @@ func NewC64() (*C64, error) {
 
 	c := cpu.NewCPU(mem)
 
-	// Initialize CPU registers
-	// Reset vector
-	c.PC = uint16(mem.Read(0xFFFC)) | uint16(mem.Read(0xFFFD))<<8
-	// Initialize stack pointer
-	c.SP = 0xFF
-	// Set interrupt disable flag
-	c.P = cpu.FlagI
-
 	return &C64{
 		CPU:    c,
 		Memory: mem,
@@ -183,7 +175,7 @@ func NewC64() (*C64, error) {
 	}, nil
 }
 
-func (c *C64) Step() {
+func (c *C64) Step() uint8 {
 	// Execute one CPU instruction
 	cpuCycles := c.CPU.Step()
 
@@ -226,6 +218,7 @@ func (c *C64) Step() {
 		// Check interrupts
 		c.updateInterrupts()
 	}
+	return cpuCycles
 }
 
 func (c *C64) updateInterrupts() {

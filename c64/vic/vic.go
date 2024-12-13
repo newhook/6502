@@ -65,6 +65,23 @@ const (
 	REG_BORDER        = 0x20
 )
 
+const (
+	// Control Register 1 ($D011) bits
+	CTRL1_RASTER8 uint8 = 0x80 // Bit 7: Bit 8 of raster compare register
+	CTRL1_ECM     uint8 = 0x40 // Bit 6: Extended Color Mode
+	CTRL1_BMM     uint8 = 0x20 // Bit 5: Bitmap Mode
+	CTRL1_DEN     uint8 = 0x10 // Bit 4: Display Enable
+	CTRL1_RSEL    uint8 = 0x08 // Bit 3: Row Select (24/25 rows)
+	CTRL1_YSCROLL uint8 = 0x07 // Bits 2-0: Vertical Scroll
+
+	// Control Register 2 ($D016) bits
+	CTRL2_UNUSED  uint8 = 0xC0 // Bits 7-6: Unused
+	CTRL2_RES     uint8 = 0x20 // Bit 5: Reset
+	CTRL2_MCM     uint8 = 0x10 // Bit 4: Multicolor Mode
+	CTRL2_CSEL    uint8 = 0x08 // Bit 3: Column Select (40/38 columns)
+	CTRL2_XSCROLL uint8 = 0x07 // Bits 2-0: Horizontal Scroll
+)
+
 type DisplayMode uint8
 
 const (
@@ -181,8 +198,8 @@ func (v *VIC) updateBadLine() {
 	// 2. Lower 3 bits of raster line match lower 3 bits of scroll register
 	// 3. Display enable bit is set
 	if v.rasterY >= 0x30 && v.rasterY <= 0xf7 {
-		if uint8(v.rasterY&0x07) == (v.registers[REG_CONTROL1] & 0x07) {
-			if v.registers[REG_CONTROL1]&0x10 != 0 {
+		if uint8(v.rasterY&0x07) == (v.registers[REG_CONTROL1] & CTRL1_YSCROLL) {
+			if v.registers[REG_CONTROL1]&CTRL1_DEN != 0 {
 				v.badLine = true
 				v.badLineEnable = true
 				return
@@ -273,8 +290,7 @@ func (v *VIC) WriteRegister(reg uint8, value uint8) {
 	case REG_CONTROL2:
 		v.updateDisplayMode()
 	case REG_RASTER:
-		v.rasterIRQ = uint16(value) |
-			((uint16(v.registers[REG_CONTROL1] & 0x80)) << 1)
+		v.rasterIRQ = uint16(value) | ((uint16(v.registers[REG_CONTROL1] & CTRL1_RASTER8)) << 1)
 	}
 }
 
@@ -292,16 +308,16 @@ func (v *VIC) updateDisplayMode() {
 	ctrl1 := v.registers[REG_CONTROL1]
 	ctrl2 := v.registers[REG_CONTROL2]
 
-	if ctrl1&0x20 != 0 {
+	if ctrl1&CTRL1_BMM != 0 {
 		// Bitmap mode
-		if ctrl2&0x10 != 0 {
+		if ctrl2&CTRL2_MCM != 0 {
 			v.displayMode = MODE_MULTICOLOR_BITMAP
 		} else {
 			v.displayMode = MODE_STANDARD_BITMAP
 		}
 	} else {
 		// Text mode
-		if ctrl2&0x10 != 0 {
+		if ctrl2&CTRL2_MCM != 0 {
 			v.displayMode = MODE_MULTICOLOR_TEXT
 		} else {
 			v.displayMode = MODE_STANDARD_TEXT

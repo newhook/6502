@@ -33,3 +33,47 @@ const (
 To create a new CPU type use the NewCPU() function.
 
 To step the CPU func (c *CPU) Step() uint8, which returns the number of cycles the opcode took.
+
+I have the following types:
+
+func NewC64() (*C64, error)
+func (c *C64) Step() uint8
+func (c *C64) updateInterrupts()
+func (c *C64) handleSpriteDMA(spriteNum int)
+func (c *C64) RenderFrame(buffer []uint8) error
+func (c *C64) Cleanup()
+
+And for memory:
+
+func NewManager() *Manager
+func (m *Manager) LoadROM(data []uint8, romType string) error
+func (m *Manager) Read(address uint16) uint8
+func (m *Manager) Write(address uint16, value uint8)
+func (m *Manager) updateMemoryConfig()
+func (m *Manager) WriteIO(offset uint16, value uint8)
+func (m *Manager) ReadIO(offset uint16) uint8
+func (m *Manager) DumpMemory(start uint16, length uint16) []uint8
+func (m *Manager) DMA(address uint16, data []uint8)
+func (m *Manager) Map()
+
+For the VICII chip, I have the following types:
+
+func NewVIC(mem *memory.Manager) *VIC
+func (v *VIC) Update(cycle uint8) *VICEvent
+func (v *VIC) updateBadLine()
+func (v *VIC) generateDisplayData()
+func (v *VIC) generateTextMode(pixelIndex uint16, charIndex uint16, xPos uint16, yPos uint16)
+func (v *VIC) generateMulticolorText(pixelIndex uint16, charIndex uint16, xPos uint16, yPos uint16)
+func (v *VIC) generateBitmapMode(pixelIndex uint16, charIndex uint16, xPos uint16, yPos uint16)
+func (v *VIC) generateMulticolorBitmap(pixelIndex uint16, charIndex uint16, xPos uint16, yPos uint16)
+func (v *VIC) updateSprites()
+func (v *VIC) WriteRegister(reg uint8, value uint8)
+func (v *VIC) ReadRegister(reg uint8) uint8
+func (v *VIC) updateDisplayMode()
+func (v *VIC) GetDisplayBuffer() []uint8
+func (v *VIC) IsBadLine() bool
+func (v *VIC) GetRasterPosition() (uint16, uint16)
+func (v *VIC) updateVideoMatrix()
+func (v *VIC) logMemoryLayout()
+func (v *VIC) getCurrentVideoAddress(charPos uint16) uint16
+func (v *VIC) getCurrentCharacterAddress(charCode uint8, rowInChar uint8) uint16
