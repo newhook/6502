@@ -121,6 +121,7 @@ func disassembleLocation(memory cpu.MemoryBus, pc int) Location {
 
 	// Extract operand bytes
 	if operandCount > 0 {
+		l.OperandBytes = make([]byte, operandCount)
 		for i := 0; i < operandCount; i++ {
 			//l.OperandBytes = memory[pc+1 : pc+1+operandCount]
 			l.OperandBytes[i] = memory.Read(uint16(pc + 1 + i))
