@@ -44,7 +44,7 @@ func main() {
 		return
 	}
 
-	fmt.Println(disassembler.DisassembleMemory(memory[:], int(startAddrInt), len))
+	fmt.Println(disassembler.DisassembleMemory(memory, int(startAddrInt), len))
 }
 
 func LoadAndSetupBinary(c *cpu.CPU, mem *Memory, filename string, startAddr int) (int, error) {
