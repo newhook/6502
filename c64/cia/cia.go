@@ -4,14 +4,14 @@ type TimerMode uint8
 
 const (
 	// Timer control bits
-	TIMER_START    uint8 = 0x01
-	TIMER_PBON    uint8 = 0x02  // Port B output
-	TIMER_OUTMODE uint8 = 0x04  // Toggle/Pulse
-	TIMER_RUNMODE uint8 = 0x08  // One-shot/Continuous
-	TIMER_FORCE   uint8 = 0x10  // Force latched value
-	TIMER_INMODE  uint8 = 0x20  // Count CPU cycles/CNT transitions
-	TIMER_SERIAL  uint8 = 0x40  // Serial port input/output
-	TIMER_50HZ    uint8 = 0x80  // 50/60Hz real-time clock
+	TIMER_START   uint8 = 0x01
+	TIMER_PBON    uint8 = 0x02 // Port B output
+	TIMER_OUTMODE uint8 = 0x04 // Toggle/Pulse
+	TIMER_RUNMODE uint8 = 0x08 // One-shot/Continuous
+	TIMER_FORCE   uint8 = 0x10 // Force latched value
+	TIMER_INMODE  uint8 = 0x20 // Count CPU cycles/CNT transitions
+	TIMER_SERIAL  uint8 = 0x40 // Serial port input/output
+	TIMER_50HZ    uint8 = 0x80 // 50/60Hz real-time clock
 )
 
 // Timer represents one CIA timer (A or B)
@@ -20,7 +20,7 @@ type Timer struct {
 	latch     uint16 // Latched value to load
 	control   uint8  // Control register
 	running   bool
-	underflow bool   // Set when timer underflows
+	underflow bool // Set when timer underflows
 }
 
 // CIA represents a complete 6526 CIA chip
@@ -30,10 +30,10 @@ type CIA struct {
 	TimerB Timer
 
 	// I/O ports
-	PortA      uint8
-	PortB      uint8
-	DirA       uint8 // Data direction for port A
-	DirB       uint8 // Data direction for port B
+	PortA uint8
+	PortB uint8
+	DirA  uint8 // Data direction for port A
+	DirB  uint8 // Data direction for port B
 
 	// Time of Day clock
 	TOD_Hours   uint8
@@ -46,8 +46,8 @@ type CIA struct {
 	TOD_50Hz    bool
 
 	// Serial port
-	Serial     uint8
-	SerialCnt  uint8
+	Serial    uint8
+	SerialCnt uint8
 
 	// Interrupt control
 	InterruptMask  uint8
@@ -60,8 +60,8 @@ type CIA struct {
 
 func NewCIA() *CIA {
 	return &CIA{
-		TimerA: Timer{latch: 0xFFFF},
-		TimerB: Timer{latch: 0xFFFF},
+		TimerA:      Timer{latch: 0xFFFF},
+		TimerB:      Timer{latch: 0xFFFF},
 		TOD_Running: true,
 	}
 }
@@ -81,7 +81,7 @@ func (c *CIA) Update(cycles uint8) *CIAEvent {
 
 	// Update serial port if active
 	if c.TimerA.control&TIMER_SERIAL != 0 {
-		c.updateSerial()
+		//c.updateSerial()
 	}
 
 	return event
@@ -152,7 +152,13 @@ func (c *CIA) updateTOD() {
 	}
 
 	// Update every 1/10th second
-	todCycles := c.TOD_50Hz ? 19656 : 19968 // PAL/NTSC cycles for 1/10th second
+	// PAL/NTSC cycles for 1/10th second
+	var todCycles int
+	if c.TOD_50Hz {
+		todCycles = 19656
+	} else {
+		todCycles = 19968
+	}
 	if c.cycles >= uint64(todCycles) {
 		c.cycles -= uint64(todCycles)
 

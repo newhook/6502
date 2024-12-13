@@ -2,8 +2,11 @@ package disassembler
 
 import (
 	"fmt"
+	"github.com/newhook/6502/cpu"
 	"strings"
 )
+
+const maxMemory = 0xffff
 
 type Location struct {
 	PC           uint16
@@ -63,9 +66,9 @@ func Decode(opcode byte) (Instruction, bool) {
 	return instruction, exists
 }
 
-func DisassembleInstructions(memory []byte) []Location {
+func DisassembleInstructions(memory cpu.MemoryBus) []Location {
 	pc := 0
-	endAddr := len(memory)
+	endAddr := maxMemory
 
 	var rows []Location
 	for pc < endAddr {
@@ -78,7 +81,7 @@ func DisassembleInstructions(memory []byte) []Location {
 }
 
 // DisassembleMemory disassembles a range of memory starting at the given address
-func DisassembleMemory(memory []byte, startAddr int, length int) string {
+func DisassembleMemory(memory cpu.MemoryBus, startAddr int, length int) string {
 	var out strings.Builder
 	pc := startAddr
 	endAddr := startAddr + length
@@ -93,9 +96,9 @@ func DisassembleMemory(memory []byte, startAddr int, length int) string {
 	return out.String()
 }
 
-func disassembleLocation(memory []byte, pc int) Location {
+func disassembleLocation(memory cpu.MemoryBus, pc int) Location {
 	// Get opcode
-	opcode := memory[pc]
+	opcode := memory.Read(uint16(pc))
 	l := Location{PC: uint16(pc), Value: opcode}
 
 	// Decode instruction
@@ -109,7 +112,7 @@ func disassembleLocation(memory []byte, pc int) Location {
 	operandCount := inst.Mode.GetOperandBytes()
 
 	// Bounds check
-	if pc+operandCount >= len(memory) {
+	if pc+operandCount >= maxMemory {
 		return l
 		//row := fmt.Sprintf("$%04X: db $%02X        ; Incomplete instruction\n", pc, opcode)
 		//return pc, row
@@ -118,13 +121,16 @@ func disassembleLocation(memory []byte, pc int) Location {
 
 	// Extract operand bytes
 	if operandCount > 0 {
-		l.OperandBytes = memory[pc+1 : pc+1+operandCount]
+		for i := 0; i < operandCount; i++ {
+			//l.OperandBytes = memory[pc+1 : pc+1+operandCount]
+			l.OperandBytes[i] = memory.Read(uint16(pc + 1 + i))
+		}
 	}
 
 	return l
 }
 
 // DisassembleBytes is a convenience function for disassembling a slice of bytes
-func DisassembleBytes(bytes []byte) string {
-	return DisassembleMemory(bytes, 0, len(bytes))
+func DisassembleBytes(bytes cpu.MemoryBus) string {
+	return DisassembleMemory(bytes, 0, maxMemory)
 }
