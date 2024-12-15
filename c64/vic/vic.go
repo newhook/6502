@@ -182,6 +182,27 @@ const (
 	MODE_EXTENDED_TEXT
 )
 
+type Registers struct {
+	sprites [8]Sprite
+	//spriteDMAActive uint8
+	spriteCollision   uint8
+	spriteBgCollision uint8
+
+	colors [15]uint8
+
+	// Colors and display buffer
+	backgroundColor [4]uint8
+	borderColor     uint8
+
+	sc1             uint8 // Screen control 1
+	sc2             uint8 // Screen control 2
+	interruptEnable uint8
+	interrupt       uint8
+	penX            uint8
+	penY            uint8
+	memPtr          uint8
+}
+
 type VIC struct {
 	mem *memory.Manager
 
@@ -202,34 +223,16 @@ type VIC struct {
 	charGen     uint16
 	bitmapBase  uint16
 
-	// Sprite state
-	sprites [8]Sprite
-	//spriteDMAActive uint8
-	sprintCollision   uint8
-	sprintBgCollision uint8
-
-	colorRegisters [15]uint8
-
-	// Colors and display buffer
-	backgroundColor [4]uint8
-	borderColor     uint8
-	displayBuffer   []uint8 // Frame buffer for rendering
-	colorBuffer     []uint8 // Color data for current line
-
-	// Registers
-	sc1             uint8 // Screen control 1
-	sc2             uint8 // Screen control 2
-	interruptEnable uint8
-	interrupt       uint8
-	penX            uint8
-	penY            uint8
-	memPtrRegister  uint8
+	displayBuffer []uint8 // Frame buffer for rendering
+	colorBuffer   []uint8 // Color data for current line
 
 	// Interrupt state
 	irqLine                bool
 	rasterIRQ              uint16 // the raster line at which an interrupt should occur.
 	irqStatus              uint8
 	spritePriorityRegister uint8
+
+	registers Registers
 }
 
 type Sprite struct {
@@ -248,7 +251,7 @@ func NewVIC(mem *memory.Manager) *VIC {
 		mem:           mem,
 		displayBuffer: make([]uint8, 320*200),
 		colorBuffer:   make([]uint8, VISIBLE_WIDTH),
-		sprites:       [8]Sprite{},
+		registers:     Registers{},
 	}
 }
 
@@ -279,7 +282,7 @@ func (v *VIC) Update(cycle uint8) *VICEvent {
 		}
 
 		// Check for raster IRQ
-		if v.rasterCounter == v.rasterIRQ && v.interruptEnable&0x01 != 0 {
+		if v.rasterCounter == v.rasterIRQ && v.registers.interruptEnable&0x01 != 0 {
 			v.irqStatus |= 0x01
 			return &VICEvent{Type: EventRasterIRQ}
 		}
@@ -294,8 +297,8 @@ func (v *VIC) updateBadLine() {
 	// 2. Lower 3 bits of raster line match lower 3 bits of scroll register
 	// 3. Display enable bit is set
 	if v.rasterCounter >= 0x30 && v.rasterCounter <= 0xf7 {
-		if uint8(v.rasterCounter&0x07) == (v.sc1 & ScreenControl1YSCROLL) {
-			if v.sc1&ScreenControl1DEN != 0 {
+		if uint8(v.rasterCounter&0x07) == (v.registers.sc1 & ScreenControl1YSCROLL) {
+			if v.registers.sc1&ScreenControl1DEN != 0 {
 				v.badLine = true
 				v.badLineEnable = true
 				return
@@ -361,7 +364,7 @@ func (v *VIC) generateDisplayData() {
 		if pixel == 1 {
 			v.displayBuffer[bufferIndex+int(bit)] = charColor
 		} else {
-			v.displayBuffer[bufferIndex+int(bit)] = v.colorRegisters[RegBgColor0-RegBorderColor] // Background color
+			v.displayBuffer[bufferIndex+int(bit)] = v.registers.colors[RegBgColor0-RegBorderColor] // Background color
 		}
 	}
 
@@ -419,7 +422,7 @@ func (v *VIC) generateTextMode(pixelIndex uint16, charIndex uint16, xPos uint16,
 	if pixel == 1 {
 		v.displayBuffer[pixelIndex] = colorData
 	} else {
-		v.displayBuffer[pixelIndex] = v.backgroundColor[0]
+		v.displayBuffer[pixelIndex] = v.registers.backgroundColor[0]
 	}
 }
 
@@ -445,7 +448,7 @@ func (v *VIC) updateSprites() {
 func (v *VIC) WriteRegister(reg uint8, value uint8) {
 	// Registers $D020-$D02E can be written at any time
 	if reg >= RegBorderColor && reg <= RegSprite7Color {
-		v.colorRegisters[reg-RegBorderColor] = value
+		v.registers.colors[reg-RegBorderColor] = value
 		return
 	}
 
@@ -458,20 +461,20 @@ func (v *VIC) WriteRegister(reg uint8, value uint8) {
 		case RegSprite0X, RegSprite1X, RegSprite2X, RegSprite3X,
 			RegSprite4X, RegSprite5X, RegSprite6X, RegSprite7X:
 			spriteNum := reg >> 1
-			v.sprites[spriteNum].xPos = (v.sprites[spriteNum].xPos & 0x100) | uint16(value)
+			v.registers.sprites[spriteNum].xPos = (v.registers.sprites[spriteNum].xPos & 0x100) | uint16(value)
 
 		case RegSprite0Y, RegSprite1Y, RegSprite2Y, RegSprite3Y,
 			RegSprite4Y, RegSprite5Y, RegSprite6Y, RegSprite7Y:
 			spriteNum := (reg - 1) >> 1
-			v.sprites[spriteNum].yPos = value
+			v.registers.sprites[spriteNum].yPos = value
 
 		case RegSpriteXMSB:
 			// Update MSB for all sprite X positions
 			for i := uint8(0); i < 8; i++ {
 				if value&(1<<i) != 0 {
-					v.sprites[i].xPos = v.sprites[i].xPos | 0x100
+					v.registers.sprites[i].xPos = v.registers.sprites[i].xPos | 0x100
 				} else {
-					v.sprites[i].xPos = v.sprites[i].xPos & 0xFF
+					v.registers.sprites[i].xPos = v.registers.sprites[i].xPos & 0xFF
 				}
 			}
 
@@ -479,7 +482,7 @@ func (v *VIC) WriteRegister(reg uint8, value uint8) {
 			// Keep raster MSB in sync
 			v.rasterIRQ &= 0xff
 			v.rasterIRQ |= (uint16(value) & ScreenControl1Raster8) << 1
-			v.sc1 = value
+			v.registers.sc1 = value
 			v.updateDisplayMode()
 			v.updateVideoMatrix()
 
@@ -487,14 +490,14 @@ func (v *VIC) WriteRegister(reg uint8, value uint8) {
 		// a raster interrupt should occur. It works in conjunction with bit 7 of the Screen
 		// Control Register 1 ($D011) since the raster line value can be from 0-311 (requiring 9 bits).
 		case RegRaster:
-			v.rasterIRQ = uint16(value) | ((uint16(v.sc1 & ScreenControl1Raster8)) << 1)
+			v.rasterIRQ = uint16(value) | ((uint16(v.registers.sc1 & ScreenControl1Raster8)) << 1)
 
 		case RegScreenControl2:
-			v.sc2 = value
+			v.registers.sc2 = value
 			v.updateDisplayMode()
 
 		case RegMemPointers:
-			v.memPtrRegister = value
+			v.registers.memPtr = value
 			// Update screen and character memory pointers
 			//v.screenMemPtr = uint16((value&MemPointersScreenMask)>>MemPointersScreenShift) << 10
 			//v.charMemPtr = uint16((value&MemPointersCharMask)>>MemPointersCharShift) << 11
@@ -502,12 +505,12 @@ func (v *VIC) WriteRegister(reg uint8, value uint8) {
 		case RegSpriteEnable:
 			// Update enabled state for each sprite
 			for i := uint8(0); i < 8; i++ {
-				v.sprites[i].enabled = (value & (1 << i)) != 0
+				v.registers.sprites[i].enabled = (value & (1 << i)) != 0
 			}
 
 		case RegSpriteYExpand:
 			for i := uint8(0); i < 8; i++ {
-				v.sprites[i].expandY = (value & (1 << i)) != 0
+				v.registers.sprites[i].expandY = (value & (1 << i)) != 0
 			}
 
 		case RegSpritePriority:
@@ -515,24 +518,24 @@ func (v *VIC) WriteRegister(reg uint8, value uint8) {
 
 		case RegSpriteMulticolor:
 			for i := uint8(0); i < 8; i++ {
-				v.sprites[i].multicolor = (value & (1 << i)) != 0
+				v.registers.sprites[i].multicolor = (value & (1 << i)) != 0
 			}
 
 		case RegSpriteXExpand:
 			for i := uint8(0); i < 8; i++ {
-				v.sprites[i].expandX = (value & (1 << i)) != 0
+				v.registers.sprites[i].expandX = (value & (1 << i)) != 0
 			}
 
 		case RegInterrupt:
 			// Writing 1 to a bit clears the interrupt
-			v.interrupt &= ^value
-			if v.interrupt == 0 {
+			v.registers.interrupt &= ^value
+			if v.registers.interrupt == 0 {
 				// All interrupts cleared, lower IRQ line
 				v.irqLine = false
 			}
 
 		case RegInterruptEnable:
-			v.interruptEnable = value
+			v.registers.interruptEnable = value
 			// Check if any enabled interrupts are pending
 			v.checkInterrupts()
 
@@ -546,10 +549,10 @@ func (v *VIC) WriteRegister(reg uint8, value uint8) {
 }
 
 func (v *VIC) checkInterrupts() {
-	pending := v.interrupt & v.interruptEnable
+	pending := v.registers.interrupt & v.registers.interruptEnable
 	if pending != 0 {
 		v.irqLine = true
-		v.interrupt |= InterruptIRQFlag
+		v.registers.interrupt |= InterruptIRQFlag
 	}
 }
 
@@ -558,17 +561,17 @@ func (v *VIC) ReadRegister(reg uint8) uint8 {
 	case RegSprite0X, RegSprite1X, RegSprite2X, RegSprite3X,
 		RegSprite4X, RegSprite5X, RegSprite6X, RegSprite7X:
 		spriteNum := reg >> 1
-		return uint8(v.sprites[spriteNum].xPos & 0xFF)
+		return uint8(v.registers.sprites[spriteNum].xPos & 0xFF)
 
 	case RegSprite0Y, RegSprite1Y, RegSprite2Y, RegSprite3Y,
 		RegSprite4Y, RegSprite5Y, RegSprite6Y, RegSprite7Y:
 		spriteNum := (reg - 1) >> 1
-		return v.sprites[spriteNum].yPos
+		return v.registers.sprites[spriteNum].yPos
 
 	case RegSpriteXMSB:
 		var msb uint8
 		for i := uint8(0); i < 8; i++ {
-			if v.sprites[i].xPos > 0xFF {
+			if v.registers.sprites[i].xPos > 0xFF {
 				msb |= 1 << i
 			}
 		}
@@ -576,7 +579,7 @@ func (v *VIC) ReadRegister(reg uint8) uint8 {
 
 	case RegScreenControl1:
 		// Ensure current raster line MSB is reflected in bit 7
-		return (v.sc1 & 0x7F) | uint8((v.rasterCounter&0x100)>>1)
+		return (v.registers.sc1 & 0x7F) | uint8((v.rasterCounter&0x100)>>1)
 
 	case RegRaster:
 		// Return current raster line (lower 8 bits)
@@ -584,14 +587,14 @@ func (v *VIC) ReadRegister(reg uint8) uint8 {
 
 	// Light pen registers are latched when triggered
 	case RegLightPenX:
-		return v.penX
+		return v.registers.penX
 	case RegLightPenY:
-		return v.penY
+		return v.registers.penY
 
 	case RegSpriteEnable:
 		var enabled uint8
 		for i := uint8(0); i < 8; i++ {
-			if v.sprites[i].enabled {
+			if v.registers.sprites[i].enabled {
 				enabled |= 1 << i
 			}
 		}
@@ -600,7 +603,7 @@ func (v *VIC) ReadRegister(reg uint8) uint8 {
 	case RegSpriteYExpand:
 		var expand uint8
 		for i := uint8(0); i < 8; i++ {
-			if v.sprites[i].expandY {
+			if v.registers.sprites[i].expandY {
 				expand |= 1 << i
 			}
 		}
@@ -609,7 +612,7 @@ func (v *VIC) ReadRegister(reg uint8) uint8 {
 	case RegSpriteMulticolor:
 		var multi uint8
 		for i := uint8(0); i < 8; i++ {
-			if v.sprites[i].multicolor {
+			if v.registers.sprites[i].multicolor {
 				multi |= 1 << i
 			}
 		}
@@ -618,7 +621,7 @@ func (v *VIC) ReadRegister(reg uint8) uint8 {
 	case RegSpriteXExpand:
 		var expand uint8
 		for i := uint8(0); i < 8; i++ {
-			if v.sprites[i].expandX {
+			if v.registers.sprites[i].expandX {
 				expand |= 1 << i
 			}
 		}
@@ -626,30 +629,30 @@ func (v *VIC) ReadRegister(reg uint8) uint8 {
 
 	case RegSpriteCollision:
 		// Reading clears the register after returning its value
-		value := v.sprintCollision
-		v.sprintCollision = 0
+		value := v.registers.spriteCollision
+		v.registers.spriteCollision = 0
 		return value
 
 	case RegSpriteBgCollision:
 		// Reading clears the register after returning its value
-		value := v.sprintBgCollision
-		v.sprintBgCollision = 0
+		value := v.registers.spriteBgCollision
+		v.registers.spriteBgCollision = 0
 		return value
 
 	case RegInterrupt:
 		// Return current interrupt status
-		return v.interrupt
+		return v.registers.interrupt
 
 	case RegInterruptEnable:
 		// Return current interrupt enable mask
-		return v.interruptEnable
+		return v.registers.interruptEnable
 
 	case RegBorderColor, RegBgColor0, RegBgColor1, RegBgColor2, RegBgColor3,
 		RegSpriteMulti0, RegSpriteMulti1,
 		RegSprite0Color, RegSprite1Color, RegSprite2Color, RegSprite3Color,
 		RegSprite4Color, RegSprite5Color, RegSprite6Color, RegSprite7Color:
 		// Color registers directly return their values
-		return v.colorRegisters[reg-RegBorderColor]
+		return v.registers.colors[reg-RegBorderColor]
 
 	default:
 		// Handle unused registers ($D03F-$D3FF)
@@ -666,8 +669,8 @@ func (v *VIC) ReadRegister(reg uint8) uint8 {
 
 func (v *VIC) updateDisplayMode() {
 	// Update display mode based on control registers
-	ctrl1 := v.sc1
-	ctrl2 := v.sc2
+	ctrl1 := v.registers.sc1
+	ctrl2 := v.registers.sc2
 
 	v.displayActive = (ctrl1 & ScreenControl1DEN) != 0
 
@@ -689,7 +692,7 @@ func (v *VIC) updateDisplayMode() {
 }
 
 //func (v *VIC) updateDisplayMode() {
-//	control1 :=v.sc1
+//	control1 := v.registers.sc1
 //	control2 := v.registers[RegScreenControl2]
 //
 //	v.bitmapMode = (control1 & ScreenControl1BitmapMode) != 0
@@ -729,7 +732,7 @@ const (
 
 func (v *VIC) updateVideoMatrix() {
 	// Get memory control register ($D018)
-	memControl := v.memPtrRegister
+	memControl := v.registers.memPtr
 
 	// Get bank selection from CIA2 Port A (top 2 bits)
 	bankSelect := v.mem.Read(0xDD00) & 0x03
@@ -743,7 +746,7 @@ func (v *VIC) updateVideoMatrix() {
 	// Character Generator/Bitmap Base
 	// Bit 3 of $D018 selects bitmap base in bitmap modes
 	// Bits 1-2 select character generator base in text modes
-	if v.sc1&ScreenControl1BMM != 0 { // Bitmap mode
+	if v.registers.sc1&ScreenControl1BMM != 0 { // Bitmap mode
 		v.bitmapBase = bankBase
 		if memControl&0x08 != 0 {
 			v.bitmapBase |= 0x2000 // Set to 8192 if bit 3 is set
@@ -769,7 +772,7 @@ func (v *VIC) updateVideoMatrix() {
 // Helper function to output memory layout for debugging
 func (v *VIC) logMemoryLayout() {
 	mode := "text"
-	if v.sc1&ScreenControl1BMM != 0 {
+	if v.registers.sc1&ScreenControl1BMM != 0 {
 		mode = "bitmap"
 	}
 
@@ -791,7 +794,7 @@ func (v *VIC) getCurrentVideoAddress(charPos uint16) uint16 {
 
 // Helper method to get current character/bitmap data pointer
 func (v *VIC) getCurrentCharacterAddress(charCode uint8, rowInChar uint8) uint16 {
-	if v.sc1&ScreenControl1BMM != 0 { // Bitmap mode
+	if v.registers.sc1&ScreenControl1BMM != 0 { // Bitmap mode
 		// In bitmap mode, address is based on pixel position
 		return v.bitmapBase + uint16(charCode)*8 + uint16(rowInChar)
 	} else {
