@@ -39,7 +39,6 @@ I have the following types:
 func NewC64() (*C64, error)
 func (c *C64) Step() uint8
 func (c *C64) updateInterrupts()
-func (c *C64) handleSpriteDMA(spriteNum int)
 func (c *C64) RenderFrame(buffer []uint8) error
 func (c *C64) Cleanup()
 
@@ -60,20 +59,8 @@ For the VICII chip, I have the following types:
 
 func NewVIC(mem *memory.Manager) *VIC
 func (v *VIC) Update(cycle uint8) *VICEvent
-func (v *VIC) updateBadLine()
-func (v *VIC) generateDisplayData()
-func (v *VIC) generateTextMode(pixelIndex uint16, charIndex uint16, xPos uint16, yPos uint16)
-func (v *VIC) generateMulticolorText(pixelIndex uint16, charIndex uint16, xPos uint16, yPos uint16)
-func (v *VIC) generateBitmapMode(pixelIndex uint16, charIndex uint16, xPos uint16, yPos uint16)
-func (v *VIC) generateMulticolorBitmap(pixelIndex uint16, charIndex uint16, xPos uint16, yPos uint16)
-func (v *VIC) updateSprites()
 func (v *VIC) WriteRegister(reg uint8, value uint8)
 func (v *VIC) ReadRegister(reg uint8) uint8
-func (v *VIC) updateDisplayMode()
 func (v *VIC) GetDisplayBuffer() []uint8
 func (v *VIC) IsBadLine() bool
 func (v *VIC) GetRasterPosition() (uint16, uint16)
-func (v *VIC) updateVideoMatrix()
-func (v *VIC) logMemoryLayout()
-func (v *VIC) getCurrentVideoAddress(charPos uint16) uint16
-func (v *VIC) getCurrentCharacterAddress(charCode uint8, rowInChar uint8) uint16

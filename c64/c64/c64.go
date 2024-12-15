@@ -27,9 +27,8 @@ const (
 	RASTER_LAST_CYCLE  = 62
 
 	// VIC-II visible area
-	FIRST_VISIBLE_LINE = 16
-	LAST_VISIBLE_LINE  = 287
-	VISIBLE_LINES      = LAST_VISIBLE_LINE - FIRST_VISIBLE_LINE + 1
+	FIRST_VISIBLE_LINE = 14
+	LAST_VISIBLE_LINE  = 298
 )
 
 type TimingConfig struct {
@@ -139,7 +138,9 @@ func NewC64() (*C64, error) {
 
 	renderer, err := sdl.CreateRenderer(window, -1, sdl.RENDERER_ACCELERATED)
 	if err != nil {
-		window.Destroy()
+		if err := window.Destroy(); err != nil {
+			fmt.Println(err)
+		}
 		return nil, err
 	}
 
@@ -149,16 +150,19 @@ func NewC64() (*C64, error) {
 		sdl.TEXTUREACCESS_STREAMING,
 		320, 200)
 	if err != nil {
-		renderer.Destroy()
-		window.Destroy()
+		if err := renderer.Destroy(); err != nil {
+			fmt.Println(err)
+		}
+		if err := window.Destroy(); err != nil {
+			fmt.Println(err)
+		}
 		return nil, err
 	}
 
 	mem := memory.NewManager()
 
 	c := cpu.NewCPU(mem)
-
-	return &C64{
+	c64 := &C64{
 		CPU:    c,
 		Memory: mem,
 		VIC:    vic.NewVIC(mem),
@@ -171,8 +175,14 @@ func NewC64() (*C64, error) {
 		renderer: renderer,
 		texture:  texture,
 		pixels:   make([]byte, 320*200*4),
-		running:  false,
-	}, nil
+		running:  true,
+	}
+
+	c64.Memory.VIC = c64.VIC
+	c64.Memory.CIA1 = c64.CIA1
+	c64.Memory.CIA2 = c64.CIA2
+
+	return c64, nil
 }
 
 func (c *C64) Step() uint8 {
@@ -267,6 +277,10 @@ var C64Colors = []uint32{
 	0xBBBBBB, // Light grey
 }
 
+func (c *C64) IsRunning() bool {
+	return c.running
+}
+
 func (c *C64) RenderFrame(buffer []uint8) error {
 	//for y := 0; y < 200; y++ {
 	//	for x := 0; x < 320; x++ {
@@ -276,6 +290,7 @@ func (c *C64) RenderFrame(buffer []uint8) error {
 	//}
 	// Handle SDL events
 	for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
+		//fmt.Println(reflect.TypeOf(event))
 		switch event.(type) {
 		case *sdl.QuitEvent:
 			c.running = false

@@ -48,7 +48,7 @@ func main() {
 		//}
 
 		// Main emulation loop
-		for {
+		for computer.IsRunning() {
 			computer.Step()
 
 			// Optional: Add delay to match real C64 speed

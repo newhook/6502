@@ -1,15 +1,24 @@
 package memory
 
-import "fmt"
+import (
+	"fmt"
+)
 
 const (
 	// Memory regions
 	BASIC_ROM_START  = 0xA000
 	BASIC_ROM_END    = 0xBFFF
+	VIC_FIRST_PAGE   = 0xD000
+	VIC_LAST_PAGE    = 0xD300
 	IO_START         = 0xD000
 	IO_END           = 0xDFFF
 	KERNAL_ROM_START = 0xE000
 	KERNAL_ROM_END   = 0xFFFF
+
+	CIA1_PAGE = 0xdc00
+	CIA2_PAGE = 0xdd00
+
+	ZERO_PAGE = 0x0000
 
 	// Memory configuration register
 	PROCESSOR_PORT = 0x0001
@@ -23,12 +32,21 @@ type MemoryConfig struct {
 	CHAREN bool // I/O area visible (true) or Character ROM visible (false)
 }
 
+type Interface interface {
+	ReadRegister(reg uint8) uint8
+	WriteRegister(reg uint8, value uint8)
+}
+
 type Manager struct {
 	ram    [65536]uint8
 	basic  [8192]uint8 // 8K BASIC ROM
 	kernal [8192]uint8 // 8K KERNAL ROM
 	char   [4096]uint8 // 4K Character ROM
 	io     [4096]uint8 // 4K I/O area
+
+	VIC  Interface
+	CIA1 Interface
+	CIA2 Interface
 
 	// Control registers
 	processorPort uint8 // Controls ROM banking
@@ -74,26 +92,51 @@ func (m *Manager) LoadROM(data []uint8, romType string) error {
 
 // Read handles memory reads with banking
 func (m *Manager) Read(address uint16) uint8 {
+	page := address & 0xFF00
+	//fmt.Printf("read page=%x address=%x m.config.CHAREN %v\n", page, address, m.config.CHAREN)
 	switch {
-	case address == PROCESSOR_PORT:
-		return m.processorPort
-	case address == PLA_PORT:
-		return m.plaPort
-	case address >= BASIC_ROM_START && address <= BASIC_ROM_END:
+	case page == ZERO_PAGE:
+		if address == PLA_PORT {
+			return m.plaPort
+		} else if address == PROCESSOR_PORT {
+			return m.processorPort
+		} else {
+			return m.ram[address]
+		}
+
+	case page >= BASIC_ROM_START && page <= BASIC_ROM_END:
 		if m.config.LORAM {
 			return m.basic[address-BASIC_ROM_START]
 		}
 		return m.ram[address]
-	case address >= IO_START && address <= IO_END:
-		if m.config.CHAREN {
-			return m.io[address-IO_START]
-		}
-		return m.char[address-IO_START]
-	case address >= KERNAL_ROM_START && address <= KERNAL_ROM_END:
+
+	case page >= KERNAL_ROM_START: // && page <= KERNAL_ROM_END:
 		if m.config.HIRAM {
 			return m.kernal[address-KERNAL_ROM_START]
 		}
 		return m.ram[address]
+
+	case page >= VIC_FIRST_PAGE && page <= VIC_LAST_PAGE:
+		if m.config.CHAREN {
+			return m.VIC.ReadRegister(uint8(address & 0x7f))
+		} else {
+			return m.ram[address]
+		}
+
+	case page == CIA1_PAGE:
+		if m.config.CHAREN {
+			return m.CIA1.ReadRegister(uint8(address & 0xf))
+		} else {
+			return m.ram[address]
+		}
+
+	case page == CIA2_PAGE:
+		if m.config.CHAREN {
+			return m.CIA2.ReadRegister(uint8(address & 0xf))
+		} else {
+			return m.ram[address]
+		}
+
 	default:
 		return m.ram[address]
 	}
@@ -101,26 +144,37 @@ func (m *Manager) Read(address uint16) uint8 {
 
 // Write handles memory writes with banking
 func (m *Manager) Write(address uint16, value uint8) {
+	page := address & 0xFF00
+	//fmt.Printf("write page=%x address=%x value=%x m.config.CHAREN %v\n", page, address, value, m.config.CHAREN)
 	switch {
-	case address == PROCESSOR_PORT:
-		m.processorPort = value
-		m.updateMemoryConfig()
-	case address == PLA_PORT:
-		m.plaPort = value
-		m.updateMemoryConfig()
-	case address >= BASIC_ROM_START && address <= BASIC_ROM_END:
-		// Can always write to RAM under ROM
-		m.ram[address] = value
-	case address >= IO_START && address <= IO_END:
-		if m.config.CHAREN {
-			m.io[address-IO_START] = value
+	case page == ZERO_PAGE:
+		if address == PLA_PORT {
+			m.plaPort = value
+			m.updateMemoryConfig()
+		} else if address == PROCESSOR_PORT {
+			m.processorPort = value
+			m.updateMemoryConfig()
 		} else {
-			// Can write to RAM under Character ROM
 			m.ram[address] = value
 		}
-	case address >= KERNAL_ROM_START && address <= KERNAL_ROM_END:
-		// Can always write to RAM under ROM
-		m.ram[address] = value
+	case page >= VIC_FIRST_PAGE && page <= VIC_LAST_PAGE:
+		if m.config.CHAREN {
+			m.VIC.WriteRegister(uint8(address&0x7f), value)
+		} else {
+			m.ram[address] = value
+		}
+	case page == CIA1_PAGE:
+		if m.config.CHAREN {
+			m.CIA1.WriteRegister(uint8(address&0xf), value)
+		} else {
+			m.ram[address] = value
+		}
+	case page == CIA2_PAGE:
+		if m.config.CHAREN {
+			m.CIA2.WriteRegister(uint8(address&0xf), value)
+		} else {
+			m.ram[address] = value
+		}
 	default:
 		m.ram[address] = value
 	}
@@ -151,6 +205,13 @@ func (m *Manager) WriteIO(offset uint16, value uint8) {
 func (m *Manager) ReadIO(offset uint16) uint8 {
 	if offset < 4096 {
 		return m.io[offset]
+	}
+	return 0
+}
+
+func (m *Manager) ReadChar(offset uint16) uint8 {
+	if offset < 4096 {
+		return m.char[offset]
 	}
 	return 0
 }
