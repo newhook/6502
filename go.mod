@@ -7,6 +7,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.2.4
 	github.com/charmbracelet/lipgloss v1.0.0
 	github.com/stretchr/testify v1.10.0
+	github.com/veandco/go-sdl2 v0.4.40
 )
 
 require (
