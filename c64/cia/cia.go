@@ -1,279 +1,662 @@
 package cia
 
-type TimerMode uint8
-
+// Register offsets from CIA base address
 const (
-	// Timer control bits
-	TIMER_START   uint8 = 0x01
-	TIMER_PBON    uint8 = 0x02 // Port B output
-	TIMER_OUTMODE uint8 = 0x04 // Toggle/Pulse
-	TIMER_RUNMODE uint8 = 0x08 // One-shot/Continuous
-	TIMER_FORCE   uint8 = 0x10 // Force latched value
-	TIMER_INMODE  uint8 = 0x20 // Count CPU cycles/CNT transitions
-	TIMER_SERIAL  uint8 = 0x40 // Serial port input/output
-	TIMER_50HZ    uint8 = 0x80 // 50/60Hz real-time clock
+	PRA       = 0x00 // Peripheral Data Register A
+	PRB       = 0x01 // Peripheral Data Register B
+	DDRA      = 0x02 // Data Direction Register A
+	DDRB      = 0x03 // Data Direction Register B
+	TA_LO     = 0x04 // Timer A Low Byte
+	TA_HI     = 0x05 // Timer A High Byte
+	TB_LO     = 0x06 // Timer B Low Byte
+	TB_HI     = 0x07 // Timer B High Byte
+	TOD_10THS = 0x08 // Time of Day Tenths
+	TOD_SEC   = 0x09 // Time of Day Seconds
+	TOD_MIN   = 0x0A // Time of Day Minutes
+	TOD_HR    = 0x0B // Time of Day Hours
+	SDR       = 0x0C // Serial Data Register
+	ICR       = 0x0D // Interrupt Control Register
+	CRA       = 0x0E // Control Register A
+	CRB       = 0x0F // Control Register B
 )
 
-// Timer represents one CIA timer (A or B)
-type Timer struct {
-	counter   uint16 // Current counter value
-	latch     uint16 // Latched value to load
-	control   uint8  // Control register
-	running   bool
-	underflow bool // Set when timer underflows
+type Registers struct {
+	// Port registers
+	portA uint8
+	portB uint8
+	ddrA  uint8
+	ddrB  uint8
+
+	// Timer registers and state
+	timerALatch uint16
+	timerBLatch uint16
+	timerA      uint16
+	timerB      uint16
+
+	// TOD registers
+	todTenths uint8
+	todSec    uint8
+	todMin    uint8
+	todHr     uint8
+
+	// Other registers
+	sdr uint8
+
+	// The Interrupt Control Register consists
+	// of a write-only MASK register and a read-only
+	// DATA register. Any interrupt will set the
+	// corresponding bit in the DATA register. Any
+	// interrupt which is enabled by the MASK register will
+	// set the IR bit (MSB) of the DATA register and bring
+	// the /IRQ pin low
+	icrMask uint8 // interrupt control mask (ICR)
+	icrData uint8 // interrupt control data (ICR)
+	cra     uint8
+	crb     uint8
 }
 
 // CIA represents a complete 6526 CIA chip
 type CIA struct {
-	// Timers
-	TimerA Timer
-	TimerB Timer
+	registers Registers
+	cycles    uint64
 
-	// I/O ports
-	PortA uint8
-	PortB uint8
-	DirA  uint8 // Data direction for port A
-	DirB  uint8 // Data direction for port B
+	todFrequency uint8
+	todMode      uint8
+	todCycles    uint16
 
-	// Time of Day clock
-	TOD_Hours   uint8
-	TOD_Minutes uint8
-	TOD_Seconds uint8
-	TOD_Tenths  uint8
-	TOD_Latch   [4]uint8
-	TOD_Alarm   [4]uint8
-	TOD_Running bool
-	TOD_50Hz    bool
+	timerAOutput    bool
+	timerBOutput    bool
+	timerAUnderflow bool
+	timerBUnderflow bool
 
-	// Serial port
-	Serial    uint8
-	SerialCnt uint8
-
-	// Interrupt control
-	InterruptMask  uint8
-	InterruptData  uint8
-	InterruptState bool
-
-	// Cycle counting
-	cycles uint64
+	irq      bool
+	isNMI    bool
+	todAlarm [4]uint8
 }
+
+const (
+	TOD_CLOCK = 0
+	TOD_ALARM = 1
+)
 
 func NewCIA() *CIA {
 	return &CIA{
-		TimerA:      Timer{latch: 0xFFFF},
-		TimerB:      Timer{latch: 0xFFFF},
-		TOD_Running: true,
+		registers: Registers{
+			timerALatch: 0xFFFF,
+			timerBLatch: 0xFFFF,
+		},
 	}
 }
 
 // Update advances the CIA state by the specified number of cycles
 func (c *CIA) Update(cycles uint8) *CIAEvent {
-	c.cycles += uint64(cycles)
-	var event *CIAEvent
+	event := &CIAEvent{}
 
-	// Update timers
-	if timerEvent := c.updateTimers(cycles); timerEvent != nil {
-		event = timerEvent
+	// Handle timers for each cycle
+	for i := uint8(0); i < cycles; i++ {
+		// Update Timer A if it's counting system clock
+		if c.registers.cra&CRA_START != 0 && c.registers.cra&CRA_INMODE == 0 {
+			c.updateTimerA()
+		}
+
+		// Update Timer B if it's counting system clock
+		if c.registers.crb&CRB_START != 0 {
+			// Check Timer B input mode
+			switch c.registers.crb & CRB_INMODE {
+			case 0x00: // System clock
+				c.updateTimerB()
+			case 0x40: // Count Timer A underflows
+				if c.timerAUnderflow {
+					c.updateTimerB()
+				}
+			}
+		}
+
+		// Clear underflow flags
+		c.timerAUnderflow = false
+		c.timerBUnderflow = false
+
+		// Update TOD if needed
+		c.todCycles++
+		if c.todCycles >= c.todPeriod() {
+			c.updateTOD()
+			c.todCycles = 0
+		}
 	}
 
-	// Update Time of Day clock
-	c.updateTOD()
-
-	// Update serial port if active
-	if c.TimerA.control&TIMER_SERIAL != 0 {
-		//c.updateSerial()
+	// Check for interrupts
+	if c.registers.icrData != 0 {
+		// If any enabled interrupt occurred
+		if (c.registers.icrData & c.registers.icrMask & 0x1F) != 0 {
+			// Set interrupt output if not already set
+			if !c.irq {
+				c.irq = true
+				// Signal interrupt based on CIA type
+				if c.isNMI {
+					event.NMI = true
+				} else {
+					event.IRQ = true
+				}
+			}
+		}
 	}
 
 	return event
 }
 
-func (c *CIA) updateTimers(cycles uint8) *CIAEvent {
-	// Update Timer A
-	if c.TimerA.running {
-		for i := uint8(0); i < cycles; i++ {
-			c.TimerA.counter--
-			if c.TimerA.counter == 0 {
-				c.TimerA.underflow = true
-
-				// Check if Timer B is counting Timer A underflows
-				if c.TimerB.control&TIMER_INMODE != 0 {
-					c.TimerB.counter--
-				}
-
-				// Reload from latch if continuous mode
-				if c.TimerA.control&TIMER_RUNMODE == 0 {
-					c.TimerA.counter = c.TimerA.latch
-				} else {
-					c.TimerA.running = false
-				}
-
-				// Generate interrupt if enabled
-				if c.InterruptMask&0x01 != 0 {
-					c.InterruptData |= 0x01
-					c.InterruptState = true
-					return &CIAEvent{Type: EventIRQ}
-				}
-			}
-		}
-	}
-
-	// Update Timer B
-	if c.TimerB.running {
-		for i := uint8(0); i < cycles; i++ {
-			if c.TimerB.control&TIMER_INMODE == 0 {
-				c.TimerB.counter--
-			}
-			if c.TimerB.counter == 0 {
-				c.TimerB.underflow = true
-
-				// Reload from latch if continuous mode
-				if c.TimerB.control&TIMER_RUNMODE == 0 {
-					c.TimerB.counter = c.TimerB.latch
-				} else {
-					c.TimerB.running = false
-				}
-
-				// Generate interrupt if enabled
-				if c.InterruptMask&0x02 != 0 {
-					c.InterruptData |= 0x02
-					c.InterruptState = true
-					return &CIAEvent{Type: EventIRQ}
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
-func (c *CIA) updateTOD() {
-	if !c.TOD_Running {
+func (c *CIA) updateTimerA() {
+	// If timer is not started, return immediately
+	if c.registers.cra&CRA_START == 0 {
 		return
 	}
 
-	// Update every 1/10th second
-	// PAL/NTSC cycles for 1/10th second
-	var todCycles int
-	if c.TOD_50Hz {
-		todCycles = 19656
-	} else {
-		todCycles = 19968
-	}
-	if c.cycles >= uint64(todCycles) {
-		c.cycles -= uint64(todCycles)
+	// Decrement timer
+	c.registers.timerA--
 
-		// Update TOD registers
-		c.TOD_Tenths++
-		if c.TOD_Tenths >= 10 {
-			c.TOD_Tenths = 0
-			c.TOD_Seconds++
-			if c.TOD_Seconds >= 60 {
-				c.TOD_Seconds = 0
-				c.TOD_Minutes++
-				if c.TOD_Minutes >= 60 {
-					c.TOD_Minutes = 0
-					c.TOD_Hours++
-					if c.TOD_Hours >= 12 {
-						c.TOD_Hours = 0
-					}
-				}
+	// Check for timer underflow
+	if c.registers.timerA == 0 {
+		// Set interrupt flag
+		if c.registers.icrMask&ICR_TA != 0 {
+			c.registers.icrData |= ICR_TA
+		}
+
+		// Handle PB6 output if enabled
+		if c.registers.cra&CRA_PBON != 0 {
+			if c.registers.cra&CRA_OUTMODE != 0 {
+				// Toggle mode
+				c.registers.portB ^= 0x40 // Toggle bit 6
+			} else {
+				// Pulse mode - set high for one cycle
+				c.registers.portB |= 0x40
 			}
 		}
 
-		// Check alarm
-		if c.checkAlarm() {
-			c.InterruptData |= 0x04
-			c.InterruptState = true
+		// Check run mode
+		if c.registers.cra&CRA_RUNMODE != 0 {
+			// One-shot mode: stop timer
+			c.registers.cra &= ^CRA_START
+		}
+
+		// Reload timer from latch
+		c.registers.timerA = c.registers.timerALatch
+	} else if c.registers.cra&CRA_PBON != 0 &&
+		c.registers.cra&CRA_OUTMODE == 0 &&
+		c.registers.timerA == 0xFFFF {
+		// In pulse mode, clear PB6 after one cycle
+		c.registers.portB &= ^uint8(0x40)
+	}
+
+	// Handle forced load
+	if c.registers.cra&CRA_FORCE != 0 {
+		c.registers.timerA = c.registers.timerB
+		c.registers.cra &= ^CRA_FORCE // Clear force load bit
+	}
+}
+
+func (c *CIA) updateTimerB() {
+	// If timer is not started, return immediately
+	if c.registers.crb&CRB_START == 0 {
+		return
+	}
+
+	// Decrement timer
+	c.registers.timerB--
+
+	// Check for timer underflow
+	if c.registers.timerB == 0 {
+		// Set interrupt flag
+		if c.registers.icrMask&ICR_TB != 0 {
+			c.registers.icrData |= ICR_TB
+		}
+
+		// Handle PB6 output if enabled
+		if c.registers.crb&CRB_PBON != 0 {
+			if c.registers.crb&CRB_OUTMODE != 0 {
+				// Toggle mode
+				c.registers.portB ^= 0x40 // Toggle bit 6
+			} else {
+				// Pulse mode - set high for one cycle
+				c.registers.portB |= 0x40
+			}
+		}
+
+		// Check run mode
+		if c.registers.crb&CRB_RUNMODE != 0 {
+			// One-shot mode: stop timer
+			c.registers.crb &= ^CRB_START
+		}
+
+		// Reload timer from latch
+		c.registers.timerB = c.registers.timerBLatch
+	} else if c.registers.crb&CRB_PBON != 0 &&
+		c.registers.crb&CRB_OUTMODE == 0 &&
+		c.registers.timerB == 0xFFFF {
+		// In pulse mode, clear PB6 after one cycle
+		c.registers.portB &= ^uint8(0x40)
+	}
+
+	// Handle forced load
+	if c.registers.crb&CRB_FORCE != 0 {
+		c.registers.timerB = c.registers.timerB
+		c.registers.crb &= ^CRB_FORCE // Clear force load bit
+	}
+}
+
+func (c *CIA) todPeriod() uint16 {
+	if c.registers.cra&CRA_TODIN != 0 {
+		return 20000 // 50Hz = 20ms
+	}
+	return 16667 // 60Hz = 16.67ms
+}
+
+func (c *CIA) updateTOD() {
+	// Add 1 to tenths in BCD
+	c.registers.todTenths = (c.registers.todTenths + 1) & 0x0F
+	if c.registers.todTenths > 0x09 {
+		c.registers.todTenths = 0x00
+
+		// Add 1 to seconds in BCD
+		if (c.registers.todSec & 0x0F) == 0x09 {
+			c.registers.todSec = c.registers.todSec + 0x10 - 0x09
+		} else {
+			c.registers.todSec = c.registers.todSec + 0x01
+		}
+
+		if c.registers.todSec > 0x59 {
+			c.registers.todSec = 0x00
+
+			// Add 1 to minutes in BCD
+			if (c.registers.todMin & 0x0F) == 0x09 {
+				c.registers.todMin = c.registers.todMin + 0x10 - 0x09
+			} else {
+				c.registers.todMin = c.registers.todMin + 0x01
+			}
+
+			if c.registers.todMin > 0x59 {
+				c.registers.todMin = 0x00
+
+				// Hours are special (1-12 with PM bit)
+				hours := c.registers.todHr & 0x1F
+				pmBit := c.registers.todHr & 0x80
+
+				if hours == 0x11 {
+					// Going from 11 to 12
+					hours = 0x12
+					pmBit ^= 0x80 // Toggle PM bit
+				} else if hours == 0x12 {
+					// Going from 12 to 1
+					hours = 0x01
+				} else if (hours & 0x0F) == 0x09 {
+					// Going from 9 to 10
+					hours = 0x10
+				} else {
+					// Normal increment
+					hours = hours + 0x01
+				}
+
+				c.registers.todHr = hours | pmBit
+			}
+		}
+	}
+
+	// Check for alarm match
+	if c.registers.todTenths == c.todAlarm[0] &&
+		c.registers.todSec == c.todAlarm[1] &&
+		c.registers.todMin == c.todAlarm[2] &&
+		c.registers.todHr == c.todAlarm[3] {
+		if c.registers.icrMask&ICR_TOD != 0 {
+			c.registers.icrData |= ICR_TOD
 		}
 	}
 }
 
-func (c *CIA) checkAlarm() bool {
-	return c.TOD_Hours == c.TOD_Alarm[0] &&
-		c.TOD_Minutes == c.TOD_Alarm[1] &&
-		c.TOD_Seconds == c.TOD_Alarm[2] &&
-		c.TOD_Tenths == c.TOD_Alarm[3]
+// Register access methods
+func (c *CIA) WriteRegister(reg uint8, val uint8) {
+	switch reg {
+	case PRA:
+		c.registers.portA = val
+	case PRB:
+		c.registers.portB = val
+	case DDRA:
+		c.registers.ddrA = val
+	case DDRB:
+		c.registers.ddrB = val
+	case TA_LO:
+		c.registers.timerALatch = (c.registers.timerALatch & 0xFF00) | uint16(val)
+	case TA_HI:
+		c.registers.timerALatch = (c.registers.timerALatch & 0x00FF) | (uint16(val) << 8)
+		c.registers.timerA = c.registers.timerALatch
+	case TB_LO:
+		c.registers.timerBLatch = (c.registers.timerBLatch & 0xFF00) | uint16(val)
+	case TB_HI:
+		c.registers.timerBLatch = (c.registers.timerBLatch & 0x00FF) | (uint16(val) << 8)
+		c.registers.timerB = c.registers.timerBLatch
+	case TOD_10THS:
+		if c.registers.crb&CRB_ALARM != 0 {
+			c.todAlarm[0] = val & 0x0F // Only lower 4 bits valid
+		} else {
+			c.registers.todTenths = val & 0x0F
+		}
+	case TOD_SEC:
+		if c.registers.crb&CRB_ALARM != 0 {
+			c.todAlarm[1] = val & 0x7F // Only 7 bits valid
+		} else {
+			c.registers.todSec = val & 0x7F
+		}
+	case TOD_MIN:
+		if c.registers.crb&CRB_ALARM != 0 {
+			c.todAlarm[2] = val & 0x7F // Only 7 bits valid
+		} else {
+			c.registers.todMin = val & 0x7F
+		}
+	case TOD_HR:
+		// Convert 0 to 12
+		hours := val & 0x1F
+		if hours == 0 {
+			hours = 0x12
+		}
+		if c.registers.crb&CRB_ALARM != 0 {
+			c.todAlarm[3] = hours | (val & 0x80) // Keep AM/PM bit
+		} else {
+			c.registers.todHr = hours | (val & 0x80)
+		}
+	case SDR:
+		c.registers.sdr = val
+	case ICR:
+		c.writeICR(val)
+	case CRA:
+		c.writeCRA(val)
+	case CRB:
+		c.writeCRB(val)
+	}
 }
 
-// Register access methods
-func (c *CIA) WriteRegister(reg uint8, value uint8) {
-	switch reg {
-	case 0x00: // Port A data
-		c.PortA = (c.PortA & ^c.DirA) | (value & c.DirA)
-	case 0x01: // Port B data
-		c.PortB = (c.PortB & ^c.DirB) | (value & c.DirB)
-	case 0x02: // Port A direction
-		c.DirA = value
-	case 0x03: // Port B direction
-		c.DirB = value
-	case 0x04, 0x05: // Timer A latch
-		if reg == 0x04 {
-			c.TimerA.latch = (c.TimerA.latch & 0xFF00) | uint16(value)
-		} else {
-			c.TimerA.latch = (c.TimerA.latch & 0x00FF) | (uint16(value) << 8)
+// Control Register A bits
+const (
+	CRA_START   uint8 = 0x01 // Start timer A (1 = Start, 0 = Stop)
+	CRA_PBON    uint8 = 0x02 // Timer A output on PB6 (1 = Output, 0 = No output)
+	CRA_OUTMODE uint8 = 0x04 // Timer A output mode (1 = Toggle, 0 = Pulse)
+	CRA_RUNMODE uint8 = 0x08 // Timer A run mode (1 = One-shot, 0 = Continuous)
+	CRA_FORCE   uint8 = 0x10 // Force Timer A load (1 = Force load)
+	CRA_INMODE  uint8 = 0x20 // Timer A input mode (1 = CNT, 0 = Clock)
+	CRA_SPMODE  uint8 = 0x40 // Serial Port mode (1 = Output, 0 = Input)
+	CRA_TODIN   uint8 = 0x80 // Time of Day frequency (1 = 50Hz, 0 = 60Hz)
+)
+
+//Bit 0: Start/Stop Timer A (1 = Start, 0 = Stop)
+//Bit 1: Output mode to PB6 (1 = Toggle, 0 = Pulse)
+//Bit 2: Timer mode (1 = Continuous, 0 = One-shot)
+//Bit 3: Force Load (1 = Force load strobe, reloads from latch)
+//Bit 4: Input mode (1 = Count CNT transitions, 0 = Count system clock)
+//Bit 5: Serial port mode (1 = Output, 0 = Input)
+//Bit 6: Direction of PB6 (1 = Output, 0 = Input)
+//Bit 7: Direction of PA (TOD) (1 = Output, 0 = Input)
+
+// Control Register B bits - similar to CRA but for Timer B
+const (
+	CRB_START   uint8 = 0x01 // Start timer B (1 = Start, 0 = Stop)
+	CRB_PBON    uint8 = 0x02 // Timer B output on PB7 (1 = Output, 0 = No output)
+	CRB_OUTMODE uint8 = 0x04 // Timer B output mode (1 = Toggle, 0 = Pulse)
+	CRB_RUNMODE uint8 = 0x08 // Timer B run mode (1 = One-shot, 0 = Continuous)
+	CRB_FORCE   uint8 = 0x10 // Force Timer B load (1 = Force load)
+	CRB_INMODE  uint8 = 0x60 // Timer B input mode (00 = Clock, 01 = CNT, 10 = Timer A underflow, 11 = Timer A underflow with CNT)
+	CRB_ALARM   uint8 = 0x80 // Time of Day alarm (1 = Alarm, 0 = Clock)
+)
+
+// Interrupt Control Register bits
+const (
+	ICR_TA   uint8 = 0x01 // Timer A interrupt (1 = Enable/Set)
+	ICR_TB   uint8 = 0x02 // Timer B interrupt (1 = Enable/Set)
+	ICR_TOD  uint8 = 0x04 // Time of Day alarm interrupt (1 = Enable/Set)
+	ICR_SDR  uint8 = 0x08 // Serial Port interrupt (1 = Enable/Set)
+	ICR_FLAG uint8 = 0x10 // FLAG line interrupt (1 = Enable/Set)
+	ICR_SET  uint8 = 0x80 // Set/Clear flag (1 = Set, 0 = Clear)
+)
+
+func (c *CIA) writeICR(val uint8) {
+	if val&ICR_SET != 0 {
+		// Set interrupt mask bits
+		c.registers.icrMask |= val & 0x1F
+	} else {
+		// Clear interrupt mask bits
+		c.registers.icrMask &= ^(val & 0x1F)
+	}
+}
+
+func (c *CIA) writeCRA(val uint8) {
+	oldStart := c.registers.cra & CRA_START
+	c.registers.cra = val
+
+	// Handle timer force load
+	if val&CRA_FORCE != 0 {
+		c.registers.timerA = c.registers.timerALatch
+		c.registers.cra &= ^CRA_FORCE // Clear force load bit
+	}
+
+	// Handle timer start/stop
+	if oldStart == 0 && (val&CRA_START != 0) {
+		// Timer is being started - load initial value if it's 0
+		if c.registers.timerA == 0 {
+			c.registers.timerA = c.registers.timerALatch
 		}
-	case 0x06, 0x07: // Timer B latch
-		if reg == 0x06 {
-			c.TimerB.latch = (c.TimerB.latch & 0xFF00) | uint16(value)
-		} else {
-			c.TimerB.latch = (c.TimerB.latch & 0x00FF) | (uint16(value) << 8)
+	}
+
+	// Update TOD frequency if changed
+	if val&CRA_TODIN != 0 {
+		// Set TOD to 50Hz
+		c.todFrequency = 50
+	} else {
+		// Set TOD to 60Hz
+		c.todFrequency = 60
+	}
+}
+
+func (c *CIA) writeCRB(val uint8) {
+	oldStart := c.registers.crb & CRB_START
+	c.registers.crb = val
+
+	// Handle timer force load
+	if val&CRB_FORCE != 0 {
+		c.registers.timerB = c.registers.timerBLatch
+		c.registers.crb &= ^CRB_FORCE // Clear force load bit
+	}
+
+	// Handle timer start/stop
+	if oldStart == 0 && (val&CRB_START != 0) {
+		// Timer is being started - load initial value if it's 0
+		if c.registers.timerB == 0 {
+			c.registers.timerB = c.registers.timerBLatch
 		}
-	case 0x0E: // Control Register A
-		c.TimerA.control = value
-		if value&TIMER_START != 0 {
-			c.TimerA.counter = c.TimerA.latch
-			c.TimerA.running = true
-		}
-	case 0x0F: // Control Register B
-		c.TimerB.control = value
-		if value&TIMER_START != 0 {
-			c.TimerB.counter = c.TimerB.latch
-			c.TimerB.running = true
-		}
+	}
+
+	// Handle TOD alarm/clock mode
+	if val&CRB_ALARM != 0 {
+		// Writing to TOD registers sets alarm time
+		c.todMode = TOD_ALARM
+	} else {
+		// Writing to TOD registers sets clock time
+		c.todMode = TOD_CLOCK
 	}
 }
 
 func (c *CIA) ReadRegister(reg uint8) uint8 {
 	switch reg {
-	case 0x00: // Port A
-		return (c.PortA & c.DirA) | (0xFF & ^c.DirA)
-	case 0x01: // Port B
-		return (c.PortB & c.DirB) | (0xFF & ^c.DirB)
-	case 0x02: // Port A direction
-		return c.DirA
-	case 0x03: // Port B direction
-		return c.DirB
-	case 0x04: // Timer A low
-		return uint8(c.TimerA.counter & 0xFF)
-	case 0x05: // Timer A high
-		return uint8(c.TimerA.counter >> 8)
-	case 0x06: // Timer B low
-		return uint8(c.TimerB.counter & 0xFF)
-	case 0x07: // Timer B high
-		return uint8(c.TimerB.counter >> 8)
-	case 0x0D: // Interrupt Data
-		value := c.InterruptData
-		c.InterruptData = 0
-		c.InterruptState = false
-		return value
+	case PRA:
+		return c.readPortA()
+	case PRB:
+		return c.readPortB()
+	case DDRA:
+		return c.registers.ddrA
+	case DDRB:
+		return c.registers.ddrB
+	case TA_LO:
+		return uint8(c.registers.timerA & 0xFF)
+	case TA_HI:
+		return uint8(c.registers.timerA >> 8)
+	case TB_LO:
+		return uint8(c.registers.timerB & 0xFF)
+	case TB_HI:
+		return uint8(c.registers.timerB >> 8)
+	case TOD_10THS:
+		return c.registers.todTenths
+	case TOD_SEC:
+		return c.registers.todSec
+	case TOD_MIN:
+		return c.registers.todMin
+	case TOD_HR:
+		return c.registers.todHr
+	case SDR:
+		return c.registers.sdr
+	case ICR:
+		return c.readICR()
+	case CRA:
+		return c.registers.cra
+	case CRB:
+		return c.registers.crb
 	}
 	return 0
 }
 
+func (c *CIA) readPortA() uint8 {
+	// For each bit:
+	// - If DDR bit is 1 (output), use value from port register
+	// - If DDR bit is 0 (input), use value from external device
+
+	// First get the current state of external input lines
+	inputValues := c.getPortAInput() // This would be different for CIA1 vs CIA2
+
+	// For output bits, use port register value, for input bits use external value
+	return (c.registers.portA & c.registers.ddrA) | (inputValues & ^c.registers.ddrA)
+}
+
+func (c *CIA) getPortAInput() uint8 {
+	// cia1 - keyboard
+	// cia2 - rs232, bank selection.
+	// VIC bank bits (0-1) are special - they're always readable
+	// regardless of DDRA, and they're inverted
+	vicBankBits := c.registers.portA & 0x03
+	return ^vicBankBits & 0x03
+}
+
+func (c *CIA) readPortB() uint8 {
+	inputValues := c.getPortBInput() // Get external values (joystick, etc)
+
+	// Handle timer outputs on PB6 (Timer A) and PB7 (Timer B)
+	var timerOutputs uint8 = 0
+
+	// If Timer A output enabled, handle PB6
+	if c.registers.cra&CRA_PBON != 0 {
+		if c.registers.cra&CRA_OUTMODE != 0 {
+			// Toggle mode - use current toggle state
+			if c.timerAOutput {
+				timerOutputs |= 0x40
+			}
+		} else {
+			// Pulse mode - only set during underflow
+			if c.timerAUnderflow {
+				timerOutputs |= 0x40
+			}
+		}
+	}
+
+	// If Timer B output enabled, handle PB7
+	if c.registers.crb&CRB_PBON != 0 {
+		if c.registers.crb&CRB_OUTMODE != 0 {
+			// Toggle mode - use current toggle state
+			if c.timerBOutput {
+				timerOutputs |= 0x80
+			}
+		} else {
+			// Pulse mode - only set during underflow
+			if c.timerBUnderflow {
+				timerOutputs |= 0x80
+			}
+		}
+	}
+
+	// Combine:
+	// - Port register values for output bits (masked by DDRB)
+	// - Input values for input bits (masked by inverted DDRB)
+	// - Timer outputs (overriding bits 6-7 if enabled)
+	return (c.registers.portB & c.registers.ddrB) | (inputValues & ^c.registers.ddrB) | timerOutputs
+}
+
+// CIA1 Port B is used for:
+// - Bits 0-7: Keyboard matrix row selection
+// - Bits 6-7: Paddles (when enabled)
+// - Bits 0-4: Joystick 1 (when reading)
+//func (c *CIA1) getPortBInput() uint8 {
+//	var result uint8 = 0xFF // Default to all lines high
+//
+//	// Joystick 1 input (active low):
+//	// Bit 0: Up
+//	// Bit 1: Down
+//	// Bit 2: Left
+//	// Bit 3: Right
+//	// Bit 4: Fire
+//	result &= c.joystick1 | 0xE0 // Preserve bits 5-7
+//
+//	// Paddle input (if enabled) on bits 6-7
+//	if c.paddlesEnabled {
+//		result = (result & 0x3F) | (c.paddleValues & 0xC0)
+//	}
+//
+//	return result
+//}
+
+// CIA2 Port B is used for:
+// - Bits 0-7: Serial bus and RS-232
+// - Bits 0-4: Joystick 2
+// - Bits 6-7: Paddles (when enabled)
+func (c *CIA) getPortBInput() uint8 {
+	//var result uint8 = 0xFF // Default to all lines high
+	//
+	//// Joystick 2 input (active low):
+	//// Same mapping as joystick 1
+	//result &= c.joystick2 | 0xE0 // Preserve bits 5-7
+	//
+	//// RS-232 input lines (if enabled)
+	//if c.rs232Enabled {
+	//	result &= c.rs232Lines
+	//}
+	//
+	//// Paddle input (if enabled) on bits 6-7
+	//if c.paddlesEnabled {
+	//	result = (result & 0x3F) | (c.paddleValues & 0xC0)
+	//}
+	//
+	//return result
+	return 0xff
+}
+
+func (c *CIA) readICR() uint8 {
+	// Reading ICR returns interrupt flags and clears them
+	value := c.registers.icrData
+
+	// Bit 7 indicates if any enabled interrupt occurred
+	if (c.registers.icrData & c.registers.icrMask & 0x1F) != 0 {
+		value |= 0x80
+	}
+
+	// Clear all interrupt flags after reading
+	c.registers.icrData = 0
+
+	// Clear interrupt output if no more pending interrupts
+	if (value & 0x80) == 0 {
+		c.irq = false
+	}
+
+	return value
+}
+
 // Helper methods for C64 core
 func (c *CIA) IsIRQActive() bool {
-	return c.InterruptState
+	//return c.InterruptState
+	return false
 }
 
+// CIAEvent represents events that can occur during CIA update
 type CIAEvent struct {
-	Type EventType
-	Data interface{}
+	IRQ bool // Interrupt request occurred
+	NMI bool // Non-maskable interrupt occurred
 }
-
-type EventType int
-
-const (
-	EventIRQ EventType = iota
-	EventNMI
-	EventSerial
-)

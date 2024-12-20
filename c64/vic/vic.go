@@ -190,6 +190,8 @@ type Registers struct {
 
 	colors [15]uint8
 
+	memoryControl uint8 // $dd018.
+
 	// Colors and display buffer
 	backgroundColor [4]uint8
 	borderColor     uint8
@@ -200,7 +202,6 @@ type Registers struct {
 	interrupt       uint8
 	penX            uint8
 	penY            uint8
-	memPtr          uint8
 }
 
 type VIC struct {
@@ -262,7 +263,7 @@ func (v *VIC) Update(cycle uint8) *VICEvent {
 	// Check for bad line condition
 	v.updateBadLine()
 
-	//// Handle display generation
+	// Handle display generation
 	if v.rasterCounter >= FIRST_VISIBLE_LINE && v.rasterCounter < LAST_VISIBLE_LINE {
 		v.generateDisplayData()
 	}
@@ -340,20 +341,7 @@ func (v *VIC) generateDisplayData() {
 	// XXX: cia.
 	//charDataAddr := v.charGen + (uint16(char) * 8) + uint16(charLine)
 	//charData := v.mem.Read(charDataAddr)
-	charData := v.mem.ReadChar(uint16(char)*8 + uint16(charLine))
-
-	//if charRow == 0 && charCol == 0 {
-	//	fmt.Printf("\n--------------\n")
-	//} else if charCol == 0 {
-	//	fmt.Printf("\n")
-	//}
-	////fmt.Printf("%02d/%02d/02x:", charRow, charCol, charData)
-	////fmt.Printf("%02d", char)
-	//if char == 0 {
-	//	fmt.Printf(" ")
-	//} else {
-	//	fmt.Printf("%c", char)
-	//}
+	charData := v.mem.ReadChar(uint16(char)*8 + charLine)
 
 	// Calculate where in display buffer to put the pixels
 	bufferIndex := v.getCurrentPixelIndex(uint16(rasterCycle), rasterCounter)
@@ -497,7 +485,7 @@ func (v *VIC) WriteRegister(reg uint8, value uint8) {
 			v.updateDisplayMode()
 
 		case RegMemPointers:
-			v.registers.memPtr = value
+			v.registers.memoryControl = value
 			// Update screen and character memory pointers
 			//v.screenMemPtr = uint16((value&MemPointersScreenMask)>>MemPointersScreenShift) << 10
 			//v.charMemPtr = uint16((value&MemPointersCharMask)>>MemPointersCharShift) << 11
@@ -732,22 +720,27 @@ const (
 
 func (v *VIC) updateVideoMatrix() {
 	// Get memory control register ($D018)
-	memControl := v.registers.memPtr
+	memControl := v.registers.memoryControl
 
 	// Get bank selection from CIA2 Port A (top 2 bits)
+	// Bank 0: $0000-$3FFF
+	// Bank 1: $4000-$7FFF
+	// Bank 2: $8000-$BFFF
+	// Bank 3: $C000-$FFFF
 	bankSelect := v.mem.Read(0xDD00) & 0x03
 	bankBase := uint16(^bankSelect&0x03) << 14 // Convert to actual base address
 
 	// Video Matrix Base Address (VM13-VM10)
 	// Bits 4-7 of $D018 specify video matrix base address within selected bank
+	// bits xxxx----
 	videoBase := uint16(memControl&0xF0) << 6
 	v.videoMatrix = bankBase | videoBase
 
 	// Character Generator/Bitmap Base
-	// Bit 3 of $D018 selects bitmap base in bitmap modes
 	// Bits 1-2 select character generator base in text modes
 	if v.registers.sc1&ScreenControl1BMM != 0 { // Bitmap mode
 		v.bitmapBase = bankBase
+		// bit  ----x---
 		if memControl&0x08 != 0 {
 			v.bitmapBase |= 0x2000 // Set to 8192 if bit 3 is set
 		}
@@ -758,12 +751,11 @@ func (v *VIC) updateVideoMatrix() {
 			v.charGen = 0xD000
 		} else {
 			// In RAM banks, use specified base address
+			// bits ----xxx-
 			charBase := uint16(memControl&0x0E) << 10
 			v.charGen = bankBase | charBase
 		}
 	}
-
-	v.videoMatrix = 0x400
 
 	// Debug output
 	v.logMemoryLayout()
