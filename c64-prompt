@@ -1,0 +1,66 @@
+I'm writing a c64 emulator with golang.
+
+All unit tests are to use testify.
+
+I have an existing 6502 emulator. The CPU type is as follows contained in
+the cpu package.
+
+type CPU struct {
+    // Registers
+    A  uint8  // Accumulator
+    X  uint8  // X index register
+    Y  uint8  // Y index register
+    PC uint16 // Program Counter
+    SP uint8  // Stack Pointer
+    P  uint8  // Status Register (Flags)
+
+    // Memory
+    Memory [65536]uint8
+}
+
+The register flags are defined as:
+
+const (
+	FlagC uint8 = 0x01 // Carry
+	FlagZ uint8 = 0x02 // Zero
+	FlagI uint8 = 0x04 // Interrupt Disable
+	FlagD uint8 = 0x08 // Decimal Mode
+	FlagB uint8 = 0x10 // Break Command
+	FlagV uint8 = 0x40 // Overflow
+	FlagN uint8 = 0x80 // Negative
+)
+
+To create a new CPU type use the NewCPU() function.
+
+To step the CPU func (c *CPU) Step() uint8, which returns the number of cycles the opcode took.
+
+I have the following types:
+
+func NewC64() (*C64, error)
+func (c *C64) Step() uint8
+func (c *C64) updateInterrupts()
+func (c *C64) RenderFrame(buffer []uint8) error
+func (c *C64) Cleanup()
+
+And for memory:
+
+func NewManager() *Manager
+func (m *Manager) LoadROM(data []uint8, romType string) error
+func (m *Manager) Read(address uint16) uint8
+func (m *Manager) Write(address uint16, value uint8)
+func (m *Manager) updateMemoryConfig()
+func (m *Manager) WriteIO(offset uint16, value uint8)
+func (m *Manager) ReadIO(offset uint16) uint8
+func (m *Manager) DumpMemory(start uint16, length uint16) []uint8
+func (m *Manager) DMA(address uint16, data []uint8)
+func (m *Manager) Map()
+
+For the VICII chip, I have the following types:
+
+func NewVIC(mem *memory.Manager) *VIC
+func (v *VIC) Update(cycle uint8) *VICEvent
+func (v *VIC) WriteRegister(reg uint8, value uint8)
+func (v *VIC) ReadRegister(reg uint8) uint8
+func (v *VIC) GetDisplayBuffer() []uint8
+func (v *VIC) IsBadLine() bool
+func (v *VIC) GetRasterPosition() (uint16, uint16)
