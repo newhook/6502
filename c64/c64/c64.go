@@ -31,15 +31,11 @@ const (
 	LAST_VISIBLE_LINE  = 298
 )
 
-type TimingConfig struct {
+// Timing represents the cycle-accurate timing system
+type Timing struct {
 	clockFrequency int
 	cyclesPerLine  int
 	linesPerFrame  int
-}
-
-// Timing represents the cycle-accurate timing system
-type Timing struct {
-	config TimingConfig
 
 	// Current timing state
 	currentCycle   uint64
@@ -57,41 +53,108 @@ type Timing struct {
 	sidCycles  uint64
 	cia1Cycles uint64
 	cia2Cycles uint64
+
+	cyclesSinceLastPrint uint64
+	lastPrintTime        time.Time
 }
 
 func NewTiming(isPAL bool) *Timing {
-	config := TimingConfig{
+	t := &Timing{
 		clockFrequency: PAL_CLOCK_HZ,
 		cyclesPerLine:  CYCLES_PER_LINE,
 		linesPerFrame:  LINES_PER_FRAME,
+		lastUpdate:     time.Now(),
+		lastPrintTime:  time.Now(),
 	}
-
 	if !isPAL {
-		config.clockFrequency = NTSC_CLOCK_HZ
-		config.linesPerFrame = 263 // NTSC has fewer lines
+		t.clockFrequency = NTSC_CLOCK_HZ
+		t.linesPerFrame = 263 // NTSC has fewer lines
 	}
-
-	return &Timing{
-		config:     config,
-		lastUpdate: time.Now(),
-	}
+	return t
 }
+
+const (
+	Throttle_None     = 0
+	Throttle_Precise  = 1
+	Throttle_PerFrame = 2
+	Throttle_Frame    = 3
+)
+
+var throttleType = Throttle_PerFrame
 
 // Step advances the system by one CPU cycle
 func (t *Timing) Step() {
 	t.currentCycle++
 	t.cyclesThisLine++
+	t.cyclesSinceLastPrint++
 
+	flushFrame := false
 	// Check for end of line
-	if t.cyclesThisLine >= t.config.cyclesPerLine {
+	if t.cyclesThisLine >= t.cyclesPerLine {
 		t.cyclesThisLine = 0
 		t.currentLine++
 
 		// Check for end of frame
-		if t.currentLine >= t.config.linesPerFrame {
+		if t.currentLine >= t.linesPerFrame {
+			flushFrame = true
+
 			t.currentLine = 0
 			t.frameCount++
 		}
+	}
+
+	// Calculate target time for this cycle
+	switch throttleType {
+	case Throttle_None:
+	case Throttle_PerFrame:
+		if flushFrame {
+			targetFrameTime := t.lastUpdate.Add(time.Second / 60) // For 60Hz
+			if sleepTime := targetFrameTime.Sub(time.Now()); sleepTime > 0 {
+				time.Sleep(sleepTime)
+			}
+			t.lastUpdate = time.Now()
+		}
+	case Throttle_Frame:
+		// Check timing every line instead of every cycle
+		if t.cyclesThisLine >= t.cyclesPerLine {
+			targetLineTime := t.lastUpdate.Add(time.Second * time.Duration(t.cyclesPerLine) / time.Duration(t.clockFrequency))
+			if sleepTime := targetLineTime.Sub(time.Now()); sleepTime > 0 {
+				time.Sleep(sleepTime)
+			}
+			t.lastUpdate = time.Now()
+
+			t.cyclesThisLine = 0
+			t.currentLine++
+
+			if t.currentLine >= t.linesPerFrame {
+				t.currentLine = 0
+				t.frameCount++
+			}
+		}
+	case Throttle_Precise:
+		targetCycleTime := t.lastUpdate.Add(time.Second / time.Duration(t.clockFrequency))
+
+		// If we're running too fast, sleep until we catch up
+		if sleepTime := targetCycleTime.Sub(time.Now()); sleepTime > 0 {
+			time.Sleep(sleepTime)
+		}
+
+		// Update last cycle time
+		t.lastUpdate = time.Now()
+	}
+
+	// Print statistics every second
+	if elapsed := time.Since(t.lastPrintTime); elapsed >= time.Second {
+		actualHz := float64(t.cyclesSinceLastPrint) / elapsed.Seconds()
+		targetHz := float64(t.clockFrequency)
+
+		fmt.Printf("CPU Speed: %.2f MHz (Target: %.2f MHz) - %.1f%% of target speed\n",
+			actualHz/1000000,
+			targetHz/1000000,
+			(actualHz/targetHz)*100)
+
+		t.cyclesSinceLastPrint = 0
+		t.lastPrintTime = time.Now()
 	}
 }
 
@@ -114,6 +177,7 @@ type C64 struct {
 	// Interrupt handling
 	irqLine bool
 	nmiLine bool
+	nmiEdge bool
 
 	// Rendering.
 	window   *sdl.Window
@@ -121,6 +185,7 @@ type C64 struct {
 	texture  *sdl.Texture
 	pixels   []byte
 	running  bool
+	keyboard *Keyboard
 }
 
 func NewC64() (*C64, error) {
@@ -158,6 +223,7 @@ func NewC64() (*C64, error) {
 		}
 		return nil, err
 	}
+	kb := NewKeyboard()
 
 	mem := memory.NewManager()
 
@@ -176,7 +242,9 @@ func NewC64() (*C64, error) {
 		texture:  texture,
 		pixels:   make([]byte, 320*200*4),
 		running:  true,
+		keyboard: kb,
 	}
+	kb.CIA = c64.CIA1
 
 	c64.Memory.VIC = c64.VIC
 	c64.Memory.CIA1 = c64.CIA1
@@ -213,17 +281,15 @@ func (c *C64) Step() uint8 {
 
 		// Update SID (runs at a different clock rate)
 		c.SID.AddDelta(1)
-		if c.SID.Clock%(c.Timing.config.clockFrequency/44100) == 0 {
+		if c.SID.Clock%(c.Timing.clockFrequency/44100) == 0 {
 			c.SID.Update()
 		}
 
 		// Update CIAs
-		//if cia1Event := c.CIA1.Update(1); cia1Event != nil {
-		//	c.handleCIA1Event(cia1Event)
-		//}
-		//if cia2Event := c.CIA2.Update(1); cia2Event != nil {
-		//	c.handleCIA2Event(cia2Event)
-		//}
+		cia1Event := c.CIA1.Update(1)
+		c.handleCIA1Event(cia1Event)
+		cia2Event := c.CIA2.Update(1)
+		c.handleCIA2Event(cia2Event)
 
 		// Check interrupts
 		c.updateInterrupts()
@@ -232,23 +298,16 @@ func (c *C64) Step() uint8 {
 }
 
 func (c *C64) updateInterrupts() {
-	// Check and handle IRQ conditions
-	//newIRQ := c.VIC.IsIRQEnabled() || c.CIA1.IRQActive() || c.CIA2.IRQActive()
-	//if newIRQ != c.irqLine {
-	//	c.irqLine = newIRQ
-	//	if newIRQ {
-	//		c.CPU.TriggerIRQ()
-	//	}
-	//}
-	//
-	//// Check and handle NMI conditions
-	//newNMI := c.CIA2.NMIActive()
-	//if newNMI != c.nmiLine {
-	//	c.nmiLine = newNMI
-	//	if newNMI {
-	//		c.CPU.TriggerNMI()
-	//	}
-	//}
+	// Check for NMI first (higher priority)
+	if c.nmiEdge {
+		c.CPU.HandleNMI()
+		c.nmiEdge = false // Clear edge detector
+	}
+
+	// Then check for IRQ
+	if c.irqLine {
+		c.CPU.HandleIRQ()
+	}
 }
 
 func (c *C64) handleSpriteDMA(spriteNum int) {
@@ -259,22 +318,22 @@ func (c *C64) handleSpriteDMA(spriteNum int) {
 
 // C64Colors represents the standard C64 palette
 var C64Colors = []uint32{
-	0x000000, // Black
-	0xFFFFFF, // White
-	0x880000, // Red
-	0xAAFFEE, // Cyan
-	0xCC44CC, // Purple
-	0x00CC55, // Green
-	0x0000AA, // Blue
-	0xEEEE77, // Yellow
-	0xDD8855, // Orange
-	0x664400, // Brown
-	0xFF7777, // Light red
-	0x333333, // Dark grey
-	0x777777, // Medium grey
-	0xAAFF66, // Light green
-	0x0088FF, // Light blue
-	0xBBBBBB, // Light grey
+	0x000000, // $0 Black
+	0xFFFFFF, // $1 White
+	0x880000, // $2 Red
+	0xAAFFEE, // $3 Cyan
+	0xCC44CC, // $4 Purple
+	0x00CC55, // $5 Green
+	0x0000AA, // $6 Blue
+	0xEEEE77, // $7 Yellow
+	0xDD8855, // $8 Orange
+	0x664400, // $9 Brown
+	0xFF7777, // $A Light red
+	0x333333, // $B Dark grey
+	0x777777, // $C Medium grey
+	0xAAFF66, // $D Light green
+	0x0088FF, // $E Light blue
+	0xBBBBBB, // $F Light grey
 }
 
 func (c *C64) IsRunning() bool {
@@ -295,6 +354,8 @@ func (c *C64) RenderFrame(buffer []uint8) error {
 		case *sdl.QuitEvent:
 			c.running = false
 			return nil
+		default:
+			c.keyboard.HandleSDLEvent(event)
 		}
 	}
 	// Convert the VIC output buffer to RGBA pixels
@@ -304,9 +365,9 @@ func (c *C64) RenderFrame(buffer []uint8) error {
 
 		// Convert 32-bit color to RGBA components
 		pixelOffset := i * 4
-		c.pixels[pixelOffset+0] = byte((color >> 24) & 0xFF) // R
-		c.pixels[pixelOffset+1] = byte((color >> 16) & 0xFF) // G
-		c.pixels[pixelOffset+2] = byte((color >> 8) & 0xFF)  // B
+		c.pixels[pixelOffset+0] = byte((color >> 16) & 0xFF) // R
+		c.pixels[pixelOffset+1] = byte((color >> 8) & 0xFF)  // G
+		c.pixels[pixelOffset+2] = byte((color) & 0xFF)       // B
 		c.pixels[pixelOffset+3] = 0xFF                       // A (full opacity)
 	}
 
@@ -342,4 +403,30 @@ func (c *C64) Cleanup() {
 		c.window.Destroy()
 	}
 	sdl.Quit()
+}
+
+func (c *C64) handleCIA1Event(event *cia.CIAEvent) {
+	if event.IRQ {
+		// CIA1 triggers IRQ
+		// Set the IRQ line low (active)
+		c.irqLine = true
+	} else {
+		// No IRQ - line goes high (inactive)
+		c.irqLine = false
+	}
+}
+
+func (c *C64) handleCIA2Event(event *cia.CIAEvent) {
+	if event.NMI {
+		// CIA2 triggers NMI
+		// NMI is edge-triggered, so we need to detect high-to-low transition
+		if !c.nmiLine { // If line was high
+			fmt.Println("nmiEdge")
+			c.nmiEdge = true // Mark that we detected an edge
+		}
+		c.nmiLine = true
+	} else {
+		// No NMI - line goes high
+		c.nmiLine = false
+	}
 }

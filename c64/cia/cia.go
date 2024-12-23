@@ -1,5 +1,10 @@
 package cia
 
+import (
+	"fmt"
+	"strings"
+)
+
 // Register offsets from CIA base address
 const (
 	PRA       = 0x00 // Peripheral Data Register A
@@ -97,6 +102,10 @@ type Registers struct {
 	crb     uint8
 }
 
+type KeyboardMatrix interface {
+	GetState(selectedRows uint8) uint8
+}
+
 // CIA represents a complete 6526 CIA chip
 type CIA struct {
 	registers Registers
@@ -120,6 +129,8 @@ type CIA struct {
 	cntCurrent  bool // Current CNT pin state
 	cntPos      bool // Positive edge detected
 	cntHigh     bool // Current CNT level (used by Timer B)
+
+	KB KeyboardMatrix
 }
 
 const (
@@ -136,6 +147,66 @@ func NewCIA() *CIA {
 			timerB:      0xFFFF,
 		},
 	}
+}
+
+func (c *Registers) DumpState() string {
+	var out strings.Builder
+
+	// Format helper for control registers
+	formatCR := func(cr uint8) string {
+		return fmt.Sprintf("0x%02X (%08b)", cr, cr)
+	}
+
+	fmt.Fprintf(&out, "CIA State Dump:\n")
+	fmt.Fprintf(&out, "==============\n\n")
+
+	// Port registers
+	fmt.Fprintf(&out, "Ports:\n")
+	fmt.Fprintf(&out, "  Port A: 0x%02X  DDR A: 0x%02X\n", c.portA, c.ddrA)
+	fmt.Fprintf(&out, "  Port B: 0x%02X  DDR B: 0x%02X\n\n", c.portB, c.ddrB)
+
+	// Timer values and latches
+	fmt.Fprintf(&out, "Timers:\n")
+	fmt.Fprintf(&out, "  Timer A:  Current: 0x%04X  Latch: 0x%04X\n", c.timerA, c.timerALatch)
+	fmt.Fprintf(&out, "  Timer B:  Current: 0x%04X  Latch: 0x%04X\n\n", c.timerB, c.timerBLatch)
+
+	// Control registers detailed breakdown
+	fmt.Fprintf(&out, "Control Register A: %s\n", formatCR(c.cra))
+	fmt.Fprintf(&out, "  Start: %v\n", (c.cra&CRA_START) != 0)
+	fmt.Fprintf(&out, "  PB6 Output: %v\n", (c.cra&CRA_PBON) != 0)
+	fmt.Fprintf(&out, "  Output Mode: %v\n", (c.cra&CRA_OUTMODE) != 0)
+	fmt.Fprintf(&out, "  Run Mode: %s\n", map[bool]string{true: "One-shot", false: "Continuous"}[(c.cra&CRA_RUNMODE) != 0])
+	fmt.Fprintf(&out, "  Force Load: %v\n", (c.cra&CRA_FORCE) != 0)
+	fmt.Fprintf(&out, "  Input Mode: %s\n", map[bool]string{true: "CNT", false: "Clock"}[(c.cra&CRA_INMODE) != 0])
+	fmt.Fprintf(&out, "  SP Mode: %s\n", map[bool]string{true: "Output", false: "Input"}[(c.cra&CRA_SPMODE) != 0])
+	fmt.Fprintf(&out, "  TOD Freq: %s\n\n", map[bool]string{true: "50Hz", false: "60Hz"}[(c.cra&CRA_TODIN) != 0])
+
+	fmt.Fprintf(&out, "Control Register B: %s\n", formatCR(c.crb))
+	fmt.Fprintf(&out, "  Start: %v\n", (c.crb&CRB_START) != 0)
+	fmt.Fprintf(&out, "  PB7 Output: %v\n", (c.crb&CRB_PBON) != 0)
+	fmt.Fprintf(&out, "  Output Mode: %v\n", (c.crb&CRB_OUTMODE) != 0)
+	fmt.Fprintf(&out, "  Run Mode: %s\n", map[bool]string{true: "One-shot", false: "Continuous"}[(c.crb&CRB_RUNMODE) != 0])
+	fmt.Fprintf(&out, "  Force Load: %v\n", (c.crb&CRB_FORCE) != 0)
+	fmt.Fprintf(&out, "  Input Mode: %02b\n", (c.crb&CRB_INMODE)>>5)
+	fmt.Fprintf(&out, "  Alarm: %v\n\n", (c.crb&CRB_ALARM) != 0)
+
+	// Interrupt control registers
+	fmt.Fprintf(&out, "Interrupt Control:\n")
+	fmt.Fprintf(&out, "  Mask: 0x%02X (%08b)\n", c.icrMask, c.icrMask)
+	fmt.Fprintf(&out, "  Data: 0x%02X (%08b)\n", c.icrData, c.icrData)
+	fmt.Fprintf(&out, "  Enabled interrupts:\n")
+	fmt.Fprintf(&out, "    Timer A: %v\n", (c.icrMask&ICR_TA) != 0)
+	fmt.Fprintf(&out, "    Timer B: %v\n", (c.icrMask&ICR_TB) != 0)
+	fmt.Fprintf(&out, "    TOD: %v\n", (c.icrMask&ICR_TOD) != 0)
+	fmt.Fprintf(&out, "    Serial: %v\n", (c.icrMask&ICR_SDR) != 0)
+	fmt.Fprintf(&out, "    Flag: %v\n\n", (c.icrMask&ICR_FLAG) != 0)
+
+	// TOD clock
+	fmt.Fprintf(&out, "Time of Day Clock:\n")
+	fmt.Fprintf(&out, "  Hr:Min:Sec.Tenths = %02X:%02X:%02X.%01X\n",
+		c.todHr, c.todMin, c.todSec, c.todTenths)
+
+	return out.String()
 }
 
 // Call this whenever the CNT pin state changes
@@ -190,15 +261,14 @@ func (c *CIA) Update(cycles uint8) *CIAEvent {
 	if c.registers.icrData != 0 {
 		// If any enabled interrupt occurred
 		if (c.registers.icrData & c.registers.icrMask & 0x1F) != 0 {
-			// Set interrupt output if not already set
-			if !c.irq {
-				c.irq = true
-				// Signal interrupt based on CIA type
-				if c.isNMI {
-					event.NMI = true
-				} else {
-					event.IRQ = true
-				}
+			c.irq = true
+		}
+		if c.irq {
+			// Signal interrupt based on CIA type
+			if c.isNMI {
+				event.NMI = true
+			} else {
+				event.IRQ = true
 			}
 		}
 	}
@@ -233,6 +303,7 @@ func (c *CIA) updateTimerA() {
 	if c.registers.timerA == 0 {
 		// Set interrupt flag
 		if c.registers.icrMask&ICR_TA != 0 {
+			//fmt.Println("timer a underflow interrupt")
 			c.registers.icrData |= ICR_TA
 		}
 
@@ -263,6 +334,7 @@ func (c *CIA) updateTimerA() {
 
 	// Handle forced load
 	if c.registers.cra&CRA_FORCE != 0 {
+		//fmt.Println("timer a force load")
 		c.registers.timerA = c.registers.timerALatch
 		c.registers.cra &= ^CRA_FORCE // Clear force load bit
 	}
@@ -408,8 +480,10 @@ func (c *CIA) updateTOD() {
 func (c *CIA) WriteRegister(reg uint8, val uint8) {
 	switch reg {
 	case PRA:
+		//fmt.Printf("write port a %x\n", val)
 		c.registers.portA = val
 	case PRB:
+		//fmt.Printf("write port b %x\n", val)
 		c.registers.portB = val
 	case DDRA:
 		c.registers.ddrA = val
@@ -417,9 +491,13 @@ func (c *CIA) WriteRegister(reg uint8, val uint8) {
 		c.registers.ddrB = val
 	case TA_LO:
 		c.registers.timerALatch = (c.registers.timerALatch & 0xFF00) | uint16(val)
+		fmt.Printf("TA_LO %x\n", val)
+		fmt.Printf("latch %x\n", c.registers.timerALatch)
 	case TA_HI:
 		c.registers.timerALatch = (c.registers.timerALatch & 0x00FF) | (uint16(val) << 8)
 		c.registers.timerA = c.registers.timerALatch
+		fmt.Printf("TA_HI %x\n", val)
+		fmt.Printf("latch %x\n", c.registers.timerALatch)
 	case TB_LO:
 		c.registers.timerBLatch = (c.registers.timerBLatch & 0xFF00) | uint16(val)
 	case TB_HI:
@@ -466,6 +544,7 @@ func (c *CIA) WriteRegister(reg uint8, val uint8) {
 }
 
 func (c *CIA) writeICR(val uint8) {
+	fmt.Printf("write icr %x\n", val)
 	if val&ICR_SET != 0 {
 		// Set interrupt mask bits
 		c.registers.icrMask |= val & 0x1F
@@ -476,6 +555,7 @@ func (c *CIA) writeICR(val uint8) {
 }
 
 func (c *CIA) writeCRA(val uint8) {
+	fmt.Printf("write cra %x\n", val)
 	oldStart := c.registers.cra & CRA_START
 	c.registers.cra = val
 
@@ -576,12 +656,20 @@ func (c *CIA) readPortA() uint8 {
 
 	// First get the current state of external input lines
 	inputValues := c.getPortAInput() // This would be different for CIA1 vs CIA2
+	fmt.Printf("read port a %x\n", inputValues)
 
 	// For output bits, use port register value, for input bits use external value
 	return (c.registers.portA & c.registers.ddrA) | (inputValues & ^c.registers.ddrA)
 }
 
 func (c *CIA) getPortAInput() uint8 {
+	fmt.Println("getPortAInput")
+	if c.KB != nil {
+		// Get keyboard state based on currently selected rows
+		return c.KB.GetState(c.registers.portA)
+		// XXX: joystick.
+	}
+
 	// cia1 - keyboard
 	// cia2 - rs232, bank selection.
 	// VIC bank bits (0-1) are special - they're always readable
@@ -591,6 +679,7 @@ func (c *CIA) getPortAInput() uint8 {
 }
 
 func (c *CIA) readPortB() uint8 {
+	//fmt.Println("getPortBInput")
 	inputValues := c.getPortBInput() // Get external values (joystick, etc)
 
 	// Handle timer outputs on PB6 (Timer A) and PB7 (Timer B)
@@ -661,6 +750,12 @@ func (c *CIA) readPortB() uint8 {
 // - Bits 0-4: Joystick 2
 // - Bits 6-7: Paddles (when enabled)
 func (c *CIA) getPortBInput() uint8 {
+	if c.KB != nil {
+		// Get keyboard state based on currently selected rows
+		return c.KB.GetState(c.registers.portA)
+		// XXX: joystick.
+	}
+
 	//var result uint8 = 0xFF // Default to all lines high
 	//
 	//// Joystick 2 input (active low):
@@ -682,6 +777,7 @@ func (c *CIA) getPortBInput() uint8 {
 }
 
 func (c *CIA) readICR() uint8 {
+	//fmt.Printf("read icr %x\n", c.registers.icrData)
 	// Reading ICR returns interrupt flags and clears them
 	value := c.registers.icrData
 
@@ -695,6 +791,7 @@ func (c *CIA) readICR() uint8 {
 
 	// Clear interrupt output if no more pending interrupts
 	if (value & 0x80) == 0 {
+		fmt.Println("clear irq")
 		c.irq = false
 	}
 

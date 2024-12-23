@@ -283,6 +283,9 @@ func (c *CPU) Step() uint8 {
 
 // execute processes a single opcode
 func (c *CPU) execute(opcode uint8) uint8 {
+	if c.PC == 0xEA87 {
+		//fmt.Println("Breakpoint")
+	}
 	switch opcode {
 	case LDA_IMM:
 		c.A = c.readImmediate()
@@ -1114,6 +1117,7 @@ func (c *CPU) execute(opcode uint8) uint8 {
 		c.P |= FlagD
 		return 2
 	case SEI:
+		fmt.Printf("SEI")
 		c.P |= FlagI
 		return 2
 
@@ -1132,6 +1136,7 @@ func (c *CPU) execute(opcode uint8) uint8 {
 	case RTI:
 		c.P = c.pull() & ^FlagB // Pull status, clear B flag
 		c.PC = c.pull16()       // Pull return address
+		//fmt.Printf("rti %x\n", c.PC)
 		return 6
 
 	default:
@@ -1501,6 +1506,42 @@ func (c *CPU) updateZN(value uint8) {
 	} else {
 		c.P &^= FlagN
 	}
+}
+
+func (c *CPU) HandleIRQ() {
+	if (c.P & FlagI) != 0 {
+		return
+	}
+
+	// Push current PC and status to stack
+	c.push16(c.PC)
+	c.push(c.P & 0xEF) // Clear B flag when pushing
+
+	// Set interrupt disable flag
+	c.P |= FlagI
+
+	// Load IRQ vector from $FFFE-$FFFF
+	c.PC = uint16(c.Read(0xFFFE)) | uint16(c.Read(0xFFFF))<<8
+	//fmt.Printf("irq %x\n", c.PC)
+
+	// IRQ takes 7 cycles
+	//c.Cycles += 7
+}
+
+func (c *CPU) HandleNMI() {
+	// Push current PC and status to stack
+	c.push16(c.PC)
+	c.push(c.P & 0xEF) // Clear B flag when pushing
+
+	// Set interrupt disable flag
+	c.P |= FlagI
+
+	// Load NMI vector from $FFFA-$FFFB
+	c.PC = uint16(c.Read(0xFFFA)) | uint16(c.Read(0xFFFB))<<8
+	//fmt.Printf("nmi %x\n", c.PC)
+
+	// IRQ takes 7 cycles
+	//c.Cycles += 7
 }
 
 type CPUAndMemory struct {

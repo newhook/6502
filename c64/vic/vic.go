@@ -182,6 +182,30 @@ const (
 	MODE_EXTENDED_TEXT
 )
 
+type Sprite struct {
+	enabled    bool
+	xPos       uint16
+	yPos       uint8
+	multicolor bool
+	expandX    bool
+	expandY    bool
+	dmaCount   uint8
+	dataPtr    uint16
+}
+
+func NewVIC(mem *memory.Manager) *VIC {
+	return &VIC{
+		mem:           mem,
+		displayBuffer: make([]uint8, 320*200),
+		colorBuffer:   make([]uint8, VISIBLE_WIDTH),
+		registers:     NewRegisters(),
+	}
+}
+
+func colorIndex(color uint8) uint8 {
+	return color - RegBorderColor
+}
+
 type Registers struct {
 	sprites [8]Sprite
 	//spriteDMAActive uint8
@@ -192,16 +216,26 @@ type Registers struct {
 
 	memoryControl uint8 // $dd018.
 
-	// Colors and display buffer
-	backgroundColor [4]uint8
-	borderColor     uint8
-
 	sc1             uint8 // Screen control 1
 	sc2             uint8 // Screen control 2
 	interruptEnable uint8
 	interrupt       uint8
 	penX            uint8
 	penY            uint8
+}
+
+func NewRegisters() Registers {
+	registers := Registers{}
+	// Initialize colors
+	//registers.backgroundColor[0] = 0x0E // Background color 0 (light blue)
+	registers.colors[colorIndex(RegBgColor0)] = 0x0E    // Background color 0 (light blue)
+	registers.colors[colorIndex(RegBorderColor)] = 0x0E // Border color (light blue)
+
+	// Screen control registers
+	registers.sc1 = 0x1B           // Default: Screen on, 25 rows, Y scroll = 3
+	registers.sc2 = 0x08           // Default: No multicolor, 40 columns, X scroll = 0
+	registers.memoryControl = 0x17 // Default memory layout
+	return registers
 }
 
 type VIC struct {
@@ -234,26 +268,6 @@ type VIC struct {
 	spritePriorityRegister uint8
 
 	registers Registers
-}
-
-type Sprite struct {
-	enabled    bool
-	xPos       uint16
-	yPos       uint8
-	multicolor bool
-	expandX    bool
-	expandY    bool
-	dmaCount   uint8
-	dataPtr    uint16
-}
-
-func NewVIC(mem *memory.Manager) *VIC {
-	return &VIC{
-		mem:           mem,
-		displayBuffer: make([]uint8, 320*200),
-		colorBuffer:   make([]uint8, VISIBLE_WIDTH),
-		registers:     Registers{},
-	}
 }
 
 // Update processes one VIC-II cycle
@@ -352,7 +366,7 @@ func (v *VIC) generateDisplayData() {
 		if pixel == 1 {
 			v.displayBuffer[bufferIndex+int(bit)] = charColor
 		} else {
-			v.displayBuffer[bufferIndex+int(bit)] = v.registers.colors[RegBgColor0-RegBorderColor] // Background color
+			v.displayBuffer[bufferIndex+int(bit)] = v.registers.colors[colorIndex(RegBgColor0)] // Background color
 		}
 	}
 
@@ -388,31 +402,31 @@ func (v *VIC) getCurrentPixelIndex(rasterX uint16, rasterY uint16) int {
 	return int(pixelY + pixelX)
 }
 
-func (v *VIC) generateTextMode(pixelIndex uint16, charIndex uint16, xPos uint16, yPos uint16) {
-	// Get character from video matrix
-	charPtr := v.videoMatrix + charIndex
-	char := v.mem.Read(charPtr)
-
-	// Get character data from character generator
-	charDataPtr := v.charGen + uint16(char)*8 + (yPos % 8)
-	charData := v.mem.Read(charDataPtr)
-
-	// Get color data
-	colorData := v.mem.Read(COLOR_RAM_BASE + charIndex)
-
-	// Calculate pixel
-	bitPos := 7 - (xPos % 8)
-	pixel := (charData >> bitPos) & 0x01
-
-	if int(pixelIndex) >= len(v.displayBuffer) {
-		return
-	}
-	if pixel == 1 {
-		v.displayBuffer[pixelIndex] = colorData
-	} else {
-		v.displayBuffer[pixelIndex] = v.registers.backgroundColor[0]
-	}
-}
+//func (v *VIC) generateTextMode(pixelIndex uint16, charIndex uint16, xPos uint16, yPos uint16) {
+//	// Get character from video matrix
+//	charPtr := v.videoMatrix + charIndex
+//	char := v.mem.Read(charPtr)
+//
+//	// Get character data from character generator
+//	charDataPtr := v.charGen + uint16(char)*8 + (yPos % 8)
+//	charData := v.mem.Read(charDataPtr)
+//
+//	// Get color data
+//	colorData := v.mem.Read(COLOR_RAM_BASE + charIndex)
+//
+//	// Calculate pixel
+//	bitPos := 7 - (xPos % 8)
+//	pixel := (charData >> bitPos) & 0x01
+//
+//	if int(pixelIndex) >= len(v.displayBuffer) {
+//		return
+//	}
+//	if pixel == 1 {
+//		v.displayBuffer[pixelIndex] = colorData
+//	} else {
+//		v.displayBuffer[pixelIndex] = v.registers.backgroundColor[0]
+//	}
+//}
 
 func (v *VIC) generateMulticolorText(pixelIndex uint16, charIndex uint16, xPos uint16, yPos uint16) {
 	// Similar to standard text mode but handles multicolor mode
@@ -436,7 +450,8 @@ func (v *VIC) updateSprites() {
 func (v *VIC) WriteRegister(reg uint8, value uint8) {
 	// Registers $D020-$D02E can be written at any time
 	if reg >= RegBorderColor && reg <= RegSprite7Color {
-		v.registers.colors[reg-RegBorderColor] = value
+		fmt.Printf("write color %x %x\n", reg, value)
+		v.registers.colors[colorIndex(reg)] = value
 		return
 	}
 
@@ -640,7 +655,7 @@ func (v *VIC) ReadRegister(reg uint8) uint8 {
 		RegSprite0Color, RegSprite1Color, RegSprite2Color, RegSprite3Color,
 		RegSprite4Color, RegSprite5Color, RegSprite6Color, RegSprite7Color:
 		// Color registers directly return their values
-		return v.registers.colors[reg-RegBorderColor]
+		return v.registers.colors[colorIndex(reg)]
 
 	default:
 		// Handle unused registers ($D03F-$D3FF)
