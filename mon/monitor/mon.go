@@ -50,8 +50,14 @@ type Monitor struct {
 	activePane    string // "disasm", "memory"
 	gotoInput     textinput.Model
 	showingGoto   bool
+	gotoDis       bool
 
 	breakpoints map[uint16]bool // Track breakpoint addresses
+
+	logBuffer       []string // Buffer to store logged lines
+	logBufferSize   int      // Maximum number of lines in the buffer
+	logScrollIndex  int      // Current scroll position in the buffer
+	visibleLogLines int      // Number of lines visible in the output window
 }
 
 // Define some basic styles
@@ -62,7 +68,7 @@ var (
 	changed   = lipgloss.AdaptiveColor{Light: "#FF6B6B", Dark: "#FF6B6B"}
 
 	titleStyle = lipgloss.NewStyle().
-			Foreground(subtle).
+			Foreground(lipgloss.Color("#FFFF00")).
 			Padding(0, 1)
 
 	infoStyle = lipgloss.NewStyle().
@@ -117,15 +123,19 @@ func NewMonitor(stepper Stepper, cpu *cpu.CPU, mem cpu.MemoryBus) *Monitor {
 	ti.Width = 6
 
 	m := &Monitor{
-		stepper:       stepper,
-		mem:           mem,
-		cpu:           cpu,
-		paused:        true,
-		locations:     disassembler.DisassembleInstructions(mem),
-		memoryAddress: 0,
-		activePane:    "disasm",
-		gotoInput:     ti,
-		breakpoints:   make(map[uint16]bool),
+		stepper:         stepper,
+		mem:             mem,
+		cpu:             cpu,
+		paused:          true,
+		locations:       disassembler.DisassembleInstructions(mem),
+		memoryAddress:   0,
+		activePane:      "disasm",
+		gotoInput:       ti,
+		breakpoints:     make(map[uint16]bool),
+		logBuffer:       make([]string, 0),
+		logBufferSize:   100, // Maximum of 100 log lines
+		logScrollIndex:  0,
+		visibleLogLines: 5, // Assume 5 lines fit in the output window; adjust as needed
 	}
 	m.relocate()
 	return m
@@ -192,7 +202,8 @@ func (m Monitor) formatMemory() string {
 
 // Implementation of tea.Model interface
 func (m Monitor) Init() tea.Cmd {
-	return nil
+	// Initialize with full-screen mode
+	return tea.Batch(tea.EnterAltScreen, tea.ClearScreen)
 }
 
 func (m *Monitor) relocate() {
@@ -204,6 +215,44 @@ func (m *Monitor) relocate() {
 	}
 	m.locationIndex = index
 	m.selectedLocation = index
+}
+
+func (m Monitor) Write(p []byte) (n int, err error) {
+	line := string(p)
+
+	// Append the new line to the buffer
+	m.logBuffer = append(m.logBuffer, line)
+
+	// Trim the buffer if it exceeds the maximum size
+	if len(m.logBuffer) > m.logBufferSize {
+		m.logBuffer = m.logBuffer[1:]
+	}
+
+	// Scroll to the bottom automatically when adding new lines
+	m.logScrollIndex = len(m.logBuffer) - m.visibleLogLines
+	if m.logScrollIndex < 0 {
+		m.logScrollIndex = 0
+	}
+	return len(p), nil
+}
+
+func (m Monitor) formatLogBuffer() string {
+	var result strings.Builder
+
+	// Determine the range of lines to display
+	start := m.logScrollIndex
+	end := start + m.visibleLogLines
+	if end > len(m.logBuffer) {
+		end = len(m.logBuffer)
+	}
+
+	// Add visible lines to the output
+	for _, line := range m.logBuffer[start:end] {
+		result.WriteString(line)
+		result.WriteString("\n")
+	}
+
+	return result.String()
 }
 
 // Handle keyboard input
@@ -243,7 +292,15 @@ func (m Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.Type {
 			case tea.KeyEnter:
 				if addr, err := strconv.ParseUint(m.gotoInput.Value(), 16, 16); err == nil {
-					m.memoryAddress = uint16(addr)
+					if m.gotoDis {
+						for i, l := range m.locations {
+							if l.PC == uint16(addr) {
+								m.selectedLocation = i
+							}
+						}
+					} else {
+						m.memoryAddress = uint16(addr)
+					}
 				}
 				m.showingGoto = false
 				return m, nil
@@ -257,10 +314,40 @@ func (m Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
+		case "G":
+			m.showingGoto = true
+			m.gotoDis = true
+			m.gotoInput.Focus()
+			return m, textinput.Blink
+		case "c":
+			// Store state before step
+			m.lastState = CPUState{
+				A:  m.cpu.A,
+				X:  m.cpu.X,
+				Y:  m.cpu.Y,
+				PC: m.cpu.PC,
+				SP: m.cpu.SP,
+				P:  m.cpu.P,
+			}
+			m.captureMemoryState()
+
+			// Execute step until we hit a breakpoint
+			for {
+				m.stepper.Step()
+				if m.breakpoints[m.cpu.PC] {
+					m.paused = true
+					break
+				}
+			}
+			m.relocate()
+
 		case "g":
 			m.showingGoto = true
 			m.gotoInput.Focus()
 			return m, textinput.Blink
+		case "r":
+			// Refresh the screen by clearing and re-rendering
+			return m, tea.Batch(tea.ClearScreen)
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "s":
@@ -456,23 +543,17 @@ func (m Monitor) formatStack() string {
 }
 
 func (m Monitor) View() string {
-
-	// Calculate column widths
-	rightColumnWidth := 32
-	leftColumnWidth := 40 // Fixed width for disassembly
+	// Set column widths
+	leftColumnWidth := 40  // Fixed width for CPU state and disassembly
+	rightColumnWidth := 50 // Fixed width for stack and memory
 
 	// Update style widths
-	infoStyle = infoStyle.Width(rightColumnWidth)
-	stackStyle = stackStyle.Width(rightColumnWidth)
+	infoStyle = infoStyle.Width(leftColumnWidth)
 	disasmStyle = disasmStyle.Width(leftColumnWidth)
+	stackStyle = stackStyle.Width(rightColumnWidth)
+	memoryStyle = memoryStyle.Width(rightColumnWidth)
 
-	// Left column: Disassembly
-	disasm := disasmStyle.Render(fmt.Sprintf(
-		"Disassembly\n\n%s",
-		m.disassemble(),
-	))
-
-	// Right column: CPU State with change highlighting
+	// Left column: CPU state and disassembly
 	cpuState := infoStyle.Render(fmt.Sprintf(
 		"CPU State\n\n%s    %s    %s\n%s  %s\n\nFlags: %s\n",
 		m.formatReg8("A", m.cpu.A, m.lastState.A),
@@ -483,6 +564,18 @@ func (m Monitor) View() string {
 		m.formatFlags(),
 	))
 
+	disasm := disasmStyle.Render(fmt.Sprintf(
+		"Disassembly\n\n%s",
+		m.disassemble(),
+	))
+
+	leftColumn := lipgloss.JoinVertical(
+		lipgloss.Left,
+		cpuState,
+		disasm,
+	)
+
+	// Right column: Stack and memory
 	stack := stackStyle.Render(fmt.Sprintf(
 		"Stack\n\n%s",
 		m.formatStack(),
@@ -493,10 +586,8 @@ func (m Monitor) View() string {
 		m.formatMemory(),
 	))
 
-	// Combine right column elements
-	right := lipgloss.JoinVertical(
+	rightColumn := lipgloss.JoinVertical(
 		lipgloss.Left,
-		cpuState,
 		stack,
 		memory,
 	)
@@ -514,12 +605,20 @@ func (m Monitor) View() string {
 		)
 	}
 
-	// Join columns horizontally with spacing
+	// Combine the columns
 	content := lipgloss.JoinHorizontal(
 		lipgloss.Top,
-		disasm,
-		lipgloss.PlaceHorizontal(3, lipgloss.Left, right),
+		leftColumn,
+		lipgloss.PlaceHorizontal(3, lipgloss.Left, rightColumn),
 	)
+
+	// Output window at the bottom
+	outputWindow := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(special).
+		Padding(1).
+		Width(m.width).
+		Render(fmt.Sprintf("Output Window\n\n%s", m.formatLogBuffer()))
 
 	// Add goto dialog if active
 	if m.showingGoto {
@@ -533,8 +632,9 @@ func (m Monitor) View() string {
 			)
 
 		return lipgloss.JoinVertical(
-			lipgloss.Center,
+			lipgloss.Left,
 			content,
+			outputWindow,
 			help,
 			dialog,
 		)
@@ -544,6 +644,7 @@ func (m Monitor) View() string {
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		content,
+		outputWindow,
 		help,
 	)
 }

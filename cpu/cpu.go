@@ -1,6 +1,10 @@
 package cpu
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+	"log/slog"
+)
 
 // The naming convention uses the instruction name followed by the addressing mode:
 //
@@ -1117,7 +1121,6 @@ func (c *CPU) execute(opcode uint8) uint8 {
 		c.P |= FlagD
 		return 2
 	case SEI:
-		fmt.Printf("SEI")
 		c.P |= FlagI
 		return 2
 
@@ -1136,7 +1139,7 @@ func (c *CPU) execute(opcode uint8) uint8 {
 	case RTI:
 		c.P = c.pull() & ^FlagB // Pull status, clear B flag
 		c.PC = c.pull16()       // Pull return address
-		//fmt.Printf("rti %x\n", c.PC)
+		slog.Log(context.Background(), slog.LevelInfo, "rti %x\n", c.PC)
 		return 6
 
 	default:
@@ -1522,7 +1525,7 @@ func (c *CPU) HandleIRQ() {
 
 	// Load IRQ vector from $FFFE-$FFFF
 	c.PC = uint16(c.Read(0xFFFE)) | uint16(c.Read(0xFFFF))<<8
-	//fmt.Printf("irq %x\n", c.PC)
+	slog.Log(context.Background(), slog.LevelInfo, "irq %x\n", c.PC)
 
 	// IRQ takes 7 cycles
 	//c.Cycles += 7

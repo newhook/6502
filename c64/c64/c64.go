@@ -1,6 +1,7 @@
 package c64
 
 import (
+	"context"
 	"fmt"
 	"github.com/newhook/6502/c64/cia"
 	"github.com/newhook/6502/c64/memory"
@@ -8,6 +9,7 @@ import (
 	"github.com/newhook/6502/c64/vic"
 	"github.com/newhook/6502/cpu"
 	"github.com/veandco/go-sdl2/sdl"
+	"log/slog"
 	"time"
 	"unsafe"
 )
@@ -148,7 +150,7 @@ func (t *Timing) Step() {
 		actualHz := float64(t.cyclesSinceLastPrint) / elapsed.Seconds()
 		targetHz := float64(t.clockFrequency)
 
-		fmt.Printf("CPU Speed: %.2f MHz (Target: %.2f MHz) - %.1f%% of target speed\n",
+		slog.Log(context.Background(), slog.LevelInfo, "CPU Speed: %.2f MHz (Target: %.2f MHz) - %.1f%% of target speed\n",
 			actualHz/1000000,
 			targetHz/1000000,
 			(actualHz/targetHz)*100)
@@ -189,6 +191,9 @@ type C64 struct {
 }
 
 func NewC64() (*C64, error) {
+	sdl.LogSetOutputFunction(func(data interface{}, category int, pri sdl.LogPriority, message string) {
+	}, nil)
+
 	if err := sdl.Init(sdl.INIT_VIDEO); err != nil {
 		return nil, err
 	}
@@ -421,7 +426,7 @@ func (c *C64) handleCIA2Event(event *cia.CIAEvent) {
 		// CIA2 triggers NMI
 		// NMI is edge-triggered, so we need to detect high-to-low transition
 		if !c.nmiLine { // If line was high
-			fmt.Println("nmiEdge")
+			slog.Log(context.Background(), slog.LevelInfo, "nmiEdge")
 			c.nmiEdge = true // Mark that we detected an edge
 		}
 		c.nmiLine = true

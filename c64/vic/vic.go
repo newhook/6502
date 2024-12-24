@@ -450,7 +450,6 @@ func (v *VIC) updateSprites() {
 func (v *VIC) WriteRegister(reg uint8, value uint8) {
 	// Registers $D020-$D02E can be written at any time
 	if reg >= RegBorderColor && reg <= RegSprite7Color {
-		fmt.Printf("write color %x %x\n", reg, value)
 		v.registers.colors[colorIndex(reg)] = value
 		return
 	}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/newhook/6502/c64/cia"
 	"github.com/veandco/go-sdl2/sdl"
+	"log/slog"
 )
 
 // SDLKeyMapping maps SDL scancodes to C64 matrix positions
@@ -120,10 +121,10 @@ func (k *Keyboard) HandleSDLEvent(event sdl.Event) {
 	case *sdl.KeyboardEvent:
 		if mapping, exists := SDLKeyMapping[e.Keysym.Scancode]; exists {
 			if e.Type == sdl.KEYDOWN {
-				fmt.Println("keydown", mapping.Symbol, mapping.Row, mapping.Col)
+				slog.Info("keydown", mapping.Symbol, mapping.Row, mapping.Col)
 				k.Matrix.KeyPress(mapping.Row, mapping.Col)
 			} else if e.Type == sdl.KEYUP {
-				fmt.Println("keyup", mapping.Symbol, mapping.Row, mapping.Col)
+				slog.Info("keyup", mapping.Symbol, mapping.Row, mapping.Col)
 				k.Matrix.KeyRelease(mapping.Row, mapping.Col)
 			}
 

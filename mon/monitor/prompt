@@ -1,0 +1,7 @@
+Change the display to take over the full window.
+Change the styling of the status bar to be yellow.
+Make the output two columns.
+Column 1 is CPU state and disassembly.
+Column 2 stack and member.
+Under both columns is a debug log of system output.
+
