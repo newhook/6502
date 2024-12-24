@@ -121,14 +121,20 @@ const (
 )
 
 func NewCIA() *CIA {
-	return &CIA{
-		//registers: Registers{
-		//	timerALatch: 0xFFFF,
-		//	timerA:      0xFFFF,
-		//	timerBLatch: 0xFFFF,
-		//	timerB:      0xFFFF,
-		//},
+	cia := &CIA{
+		timerALatch: 0xFFFF,
+		timerA:      0xFFFF,
+		timerBLatch: 0xFFFF,
+		timerB:      0xFFFF,
 	}
+
+	// Initialize timer latches and values to 0xFFFF
+	cia.registers[TA_HI] = 0xFF
+	cia.registers[TA_LO] = 0xFF
+	cia.registers[TB_LO] = 0xFF
+	cia.registers[TB_HI] = 0xFF
+
+	return cia
 }
 
 // Call this whenever the CNT pin state changes
