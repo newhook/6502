@@ -2,9 +2,7 @@ package main
 
 import (
 	"github.com/newhook/6502/c64/c64"
-	"github.com/newhook/6502/mon/monitor"
 	"log"
-	"log/slog"
 	"os"
 )
 
@@ -44,9 +42,9 @@ func main() {
 		// Reset vector
 		computer.CPU.PC = uint16(mem.Read(0xFFFC)) | uint16(mem.Read(0xFFFD))<<8
 
-		m := monitor.NewMonitor(computer, computer.CPU, computer.Memory)
-		logger := slog.New(slog.NewTextHandler(m, nil))
-		slog.SetDefault(logger)
+		//m := monitor.NewMonitor(computer, computer.CPU, computer.Memory)
+		//logger := slog.New(slog.NewTextHandler(m, nil))
+		//slog.SetDefault(logger)
 		//p := tea.NewProgram(m)
 		//if _, err := p.Run(); err != nil {
 		//	return err
