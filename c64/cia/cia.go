@@ -405,48 +405,44 @@ func (c *CIA) updateTOD() {
 // Register access methods
 func (c *CIA) WriteRegister(reg uint8, val uint8) {
 	switch reg {
-	case PRA:
-		//slog.Info(fmt.Sprintf("write port a %x", val))
+	case PRA, PRB, SDR, DDRA, DDRB:
 		c.Registers[PRA] = val
-	case PRB:
-		//slog.Info("write port b %x\n", val)
-		c.Registers[PRB] = val
-	case DDRA:
-		c.Registers[DDRA] = val
-	case DDRB:
-		c.Registers[DDRB] = val
+
 	case TA_LO:
 		c.TimerALatch = (c.TimerALatch & 0xFF00) | uint16(val)
-		//slog.Info(fmt.Sprintf("TA_LO %x", val))
-		//slog.Info(fmt.Sprintf("latch %x", c.TimerALatch))
+
 	case TA_HI:
 		c.TimerALatch = (c.TimerALatch & 0x00FF) | (uint16(val) << 8)
 		c.TimerA = c.TimerALatch
-		//slog.Info(fmt.Sprintf("TA_HI %x", val))
-		//slog.Info(fmt.Sprintf("latch %x", c.TimerALatch))
+
 	case TB_LO:
 		c.TimerBLatch = (c.TimerBLatch & 0xFF00) | uint16(val)
+
 	case TB_HI:
 		c.TimerBLatch = (c.TimerBLatch & 0x00FF) | (uint16(val) << 8)
 		c.TimerB = c.TimerBLatch
+
 	case TOD_10THS:
 		if c.Registers[CRB]&CRB_ALARM != 0 {
 			c.todAlarm[0] = val & 0x0F // Only lower 4 bits valid
 		} else {
 			c.Registers[TOD_10THS] = val & 0x0F
 		}
+
 	case TOD_SEC:
 		if c.Registers[CRB]&CRB_ALARM != 0 {
 			c.todAlarm[1] = val & 0x7F // Only 7 bits valid
 		} else {
 			c.Registers[TOD_SEC] = val & 0x7F
 		}
+
 	case TOD_MIN:
 		if c.Registers[CRB]&CRB_ALARM != 0 {
 			c.todAlarm[2] = val & 0x7F // Only 7 bits valid
 		} else {
 			c.Registers[TOD_MIN] = val & 0x7F
 		}
+
 	case TOD_HR:
 		// Convert 0 to 12
 		hours := val & 0x1F
@@ -458,82 +454,71 @@ func (c *CIA) WriteRegister(reg uint8, val uint8) {
 		} else {
 			c.Registers[TOD_HR] = hours | (val & 0x80)
 		}
-	case SDR:
-		c.Registers[SDR] = val
+
 	case ICR:
-		c.writeICR(val)
+		//slog.Info(fmt.Sprintf("write icr %x", val))
+		if val&ICR_SET != 0 {
+			// Set interrupt mask bits
+			c.Registers[ICR] |= val & 0x1F
+		} else {
+			// Clear interrupt mask bits
+			c.Registers[ICR] &= ^(val & 0x1F)
+		}
+
 	case CRA:
-		c.writeCRA(val)
-	case CRB:
-		c.writeCRB(val)
-	}
-}
+		//slog.Info(fmt.Sprintf("write cra %x", val))
+		oldStart := c.Registers[CRA] & CRA_START
+		c.Registers[CRA] = val
 
-func (c *CIA) writeICR(val uint8) {
-	//slog.Info(fmt.Sprintf("write icr %x", val))
-	if val&ICR_SET != 0 {
-		// Set interrupt mask bits
-		c.Registers[ICR] |= val & 0x1F
-	} else {
-		// Clear interrupt mask bits
-		c.Registers[ICR] &= ^(val & 0x1F)
-	}
-}
-
-func (c *CIA) writeCRA(val uint8) {
-	//slog.Info(fmt.Sprintf("write cra %x", val))
-	oldStart := c.Registers[CRA] & CRA_START
-	c.Registers[CRA] = val
-
-	// Handle timer force load
-	if val&CRA_FORCE != 0 {
-		c.TimerA = c.TimerALatch
-		c.Registers[CRA] &= ^CRA_FORCE // Clear force load bit
-	}
-
-	// Handle timer start/stop
-	if oldStart == 0 && (val&CRA_START != 0) {
-		// Timer is being started - load initial value if it's 0
-		if c.TimerA == 0 {
+		// Handle timer force load
+		if val&CRA_FORCE != 0 {
 			c.TimerA = c.TimerALatch
+			c.Registers[CRA] &= ^CRA_FORCE // Clear force load bit
 		}
-	}
 
-	// Update TOD frequency if changed
-	if val&CRA_TODIN != 0 {
-		// Set TOD to 50Hz
-		c.todFrequency = 50
-	} else {
-		// Set TOD to 60Hz
-		c.todFrequency = 60
-	}
-}
+		// Handle timer start/stop
+		if oldStart == 0 && (val&CRA_START != 0) {
+			// Timer is being started - load initial value if it's 0
+			if c.TimerA == 0 {
+				c.TimerA = c.TimerALatch
+			}
+		}
 
-func (c *CIA) writeCRB(val uint8) {
-	oldStart := c.Registers[CRB] & CRB_START
-	c.Registers[CRB] = val
+		// Update TOD frequency if changed
+		if val&CRA_TODIN != 0 {
+			// Set TOD to 50Hz
+			c.todFrequency = 50
+		} else {
+			// Set TOD to 60Hz
+			c.todFrequency = 60
+		}
 
-	// Handle timer force load
-	if val&CRB_FORCE != 0 {
-		c.TimerB = c.TimerBLatch
-		c.Registers[CRB] &= ^CRB_FORCE // Clear force load bit
-	}
+	case CRB:
+		oldStart := c.Registers[CRB] & CRB_START
+		c.Registers[CRB] = val
 
-	// Handle timer start/stop
-	if oldStart == 0 && (val&CRB_START != 0) {
-		// Timer is being started - load initial value if it's 0
-		if c.TimerB == 0 {
+		// Handle timer force load
+		if val&CRB_FORCE != 0 {
 			c.TimerB = c.TimerBLatch
+			c.Registers[CRB] &= ^CRB_FORCE // Clear force load bit
 		}
-	}
 
-	// Handle TOD alarm/clock mode
-	if val&CRB_ALARM != 0 {
-		// Writing to TOD Registers sets alarm time
-		c.todMode = TOD_ALARM
-	} else {
-		// Writing to TOD Registers sets clock time
-		c.todMode = TOD_CLOCK
+		// Handle timer start/stop
+		if oldStart == 0 && (val&CRB_START != 0) {
+			// Timer is being started - load initial value if it's 0
+			if c.TimerB == 0 {
+				c.TimerB = c.TimerBLatch
+			}
+		}
+
+		// Handle TOD alarm/clock mode
+		if val&CRB_ALARM != 0 {
+			// Writing to TOD Registers sets alarm time
+			c.todMode = TOD_ALARM
+		} else {
+			// Writing to TOD Registers sets clock time
+			c.todMode = TOD_CLOCK
+		}
 	}
 }
 
@@ -543,10 +528,6 @@ func (c *CIA) ReadRegister(reg uint8) uint8 {
 		return c.readPortA()
 	case PRB:
 		return c.readPortB()
-	case DDRA:
-		return c.Registers[DDRA]
-	case DDRB:
-		return c.Registers[DDRB]
 	case TA_LO:
 		return uint8(c.TimerA & 0xFF)
 	case TA_HI:
@@ -555,24 +536,11 @@ func (c *CIA) ReadRegister(reg uint8) uint8 {
 		return uint8(c.TimerB & 0xFF)
 	case TB_HI:
 		return uint8(c.TimerB >> 8)
-	case TOD_10THS:
-		return c.Registers[TOD_10THS]
-	case TOD_SEC:
-		return c.Registers[TOD_SEC]
-	case TOD_MIN:
-		return c.Registers[TOD_MIN]
-	case TOD_HR:
-		return c.Registers[TOD_HR]
-	case SDR:
-		return c.Registers[SDR]
 	case ICR:
 		return c.readICR()
-	case CRA:
-		return c.Registers[CRA]
-	case CRB:
-		return c.Registers[CRB]
+	default:
+		return c.Registers[reg]
 	}
-	return 0
 }
 
 func (c *CIA) readPortA() uint8 {
