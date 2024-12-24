@@ -19,10 +19,10 @@ func TestTODClock(t *testing.T) {
 		cia.updateTOD()
 
 		// Should now be 2:00:00.0
-		assert.Equal(t, uint8(0x02), cia.registers.todHr&0x1F) // Hour = 2
-		assert.Equal(t, uint8(0x00), cia.registers.todMin)
-		assert.Equal(t, uint8(0x00), cia.registers.todSec)
-		assert.Equal(t, uint8(0x00), cia.registers.todTenths)
+		assert.Equal(t, uint8(0x02), cia.Registers.todHr&0x1F) // Hour = 2
+		assert.Equal(t, uint8(0x00), cia.Registers.todMin)
+		assert.Equal(t, uint8(0x00), cia.Registers.todSec)
+		assert.Equal(t, uint8(0x00), cia.Registers.todTenths)
 	})
 
 	t.Run("AM/PM transition", func(t *testing.T) {
@@ -38,10 +38,10 @@ func TestTODClock(t *testing.T) {
 		cia.updateTOD()
 
 		// Should be 12:00:00.0 PM
-		assert.Equal(t, uint8(0x92), cia.registers.todHr) // 12 PM in BCD (0x80 for PM | 0x12)
-		assert.Equal(t, uint8(0x00), cia.registers.todMin)
-		assert.Equal(t, uint8(0x00), cia.registers.todSec)
-		assert.Equal(t, uint8(0x00), cia.registers.todTenths)
+		assert.Equal(t, uint8(0x92), cia.Registers.todHr) // 12 PM in BCD (0x80 for PM | 0x12)
+		assert.Equal(t, uint8(0x00), cia.Registers.todMin)
+		assert.Equal(t, uint8(0x00), cia.Registers.todSec)
+		assert.Equal(t, uint8(0x00), cia.Registers.todTenths)
 	})
 
 	t.Run("12 hour rollover", func(t *testing.T) {
@@ -57,10 +57,10 @@ func TestTODClock(t *testing.T) {
 		cia.updateTOD()
 
 		// Should be 1:00:00.0 PM
-		assert.Equal(t, uint8(0x81), cia.registers.todHr) // 1 with PM bit set
-		assert.Equal(t, uint8(0x00), cia.registers.todMin)
-		assert.Equal(t, uint8(0x00), cia.registers.todSec)
-		assert.Equal(t, uint8(0x00), cia.registers.todTenths)
+		assert.Equal(t, uint8(0x81), cia.Registers.todHr) // 1 with PM bit set
+		assert.Equal(t, uint8(0x00), cia.Registers.todMin)
+		assert.Equal(t, uint8(0x00), cia.Registers.todSec)
+		assert.Equal(t, uint8(0x00), cia.Registers.todTenths)
 	})
 }
 
@@ -75,12 +75,12 @@ func TestTODAlarm(t *testing.T) {
 		cia.WriteRegister(TOD_10THS, 0x09)
 
 		// Set alarm for 2:00:00.0 AM
-		cia.WriteRegister(CRB, cia.registers.crb|CRB_ALARM) // Enable alarm set
+		cia.WriteRegister(CRB, cia.Registers.crb|CRB_ALARM) // Enable alarm set
 		cia.WriteRegister(TOD_HR, 0x02)
 		cia.WriteRegister(TOD_MIN, 0x00)
 		cia.WriteRegister(TOD_SEC, 0x00)
 		cia.WriteRegister(TOD_10THS, 0x00)
-		cia.WriteRegister(CRB, cia.registers.crb&^CRB_ALARM) // Disable alarm set
+		cia.WriteRegister(CRB, cia.Registers.crb&^CRB_ALARM) // Disable alarm set
 
 		// Enable TOD interrupt
 		cia.WriteRegister(ICR, ICR_SET|ICR_TOD)
@@ -89,7 +89,7 @@ func TestTODAlarm(t *testing.T) {
 		cia.updateTOD()
 
 		// Check if alarm triggered
-		assert.True(t, (cia.registers.icrData&ICR_TOD) != 0)
+		assert.True(t, (cia.Registers.icrData&ICR_TOD) != 0)
 	})
 
 	t.Run("alarm with PM bit", func(t *testing.T) {
@@ -102,12 +102,12 @@ func TestTODAlarm(t *testing.T) {
 		cia.WriteRegister(TOD_10THS, 0x09)
 
 		// Set alarm for 12:00:00.0 PM
-		cia.WriteRegister(CRB, cia.registers.crb|CRB_ALARM)
+		cia.WriteRegister(CRB, cia.Registers.crb|CRB_ALARM)
 		cia.WriteRegister(TOD_HR, 0x92) // 12 PM in BCD (0x80 for PM | 0x12)
 		cia.WriteRegister(TOD_MIN, 0x00)
 		cia.WriteRegister(TOD_SEC, 0x00)
 		cia.WriteRegister(TOD_10THS, 0x00)
-		cia.WriteRegister(CRB, cia.registers.crb&^CRB_ALARM)
+		cia.WriteRegister(CRB, cia.Registers.crb&^CRB_ALARM)
 
 		// Enable TOD interrupt
 		cia.WriteRegister(ICR, ICR_SET|ICR_TOD)
@@ -116,7 +116,7 @@ func TestTODAlarm(t *testing.T) {
 		cia.updateTOD()
 
 		// Check if alarm triggered
-		assert.True(t, (cia.registers.icrData&ICR_TOD) != 0)
+		assert.True(t, (cia.Registers.icrData&ICR_TOD) != 0)
 	})
 
 	t.Run("TOD frequency", func(t *testing.T) {
@@ -135,12 +135,12 @@ func TestTODAlarm(t *testing.T) {
 
 		// Try to set hour to 0 (should become 12)
 		cia.WriteRegister(TOD_HR, 0x00)
-		assert.Equal(t, uint8(0x12), cia.registers.todHr) // 12 in BCD
+		assert.Equal(t, uint8(0x12), cia.Registers.todHr) // 12 in BCD
 
 		// Try to set alarm hour to 0 (should become 12)
-		cia.WriteRegister(CRB, cia.registers.crb|CRB_ALARM)
+		cia.WriteRegister(CRB, cia.Registers.crb|CRB_ALARM)
 		cia.WriteRegister(TOD_HR, 0x00)
-		cia.WriteRegister(CRB, cia.registers.crb&^CRB_ALARM)
+		cia.WriteRegister(CRB, cia.Registers.crb&^CRB_ALARM)
 		assert.Equal(t, uint8(0x12), cia.todAlarm[3]) // 12 in BCD
 	})
 }

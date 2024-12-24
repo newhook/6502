@@ -81,8 +81,8 @@ type CIA struct {
 	// set the IR bit (MSB) of the DATA register and bring
 	// the /IRQ pin low
 
-	//registers Registers
-	registers [16]uint8
+	//Registers Registers
+	Registers [16]uint8
 	icrData   uint8 // interrupt control data (ICR)
 
 	timerALatch uint16
@@ -128,10 +128,10 @@ func NewCIA() *CIA {
 	}
 
 	// Initialize timer latches and values to 0xFFFF
-	cia.registers[TA_HI] = 0xFF
-	cia.registers[TA_LO] = 0xFF
-	cia.registers[TB_LO] = 0xFF
-	cia.registers[TB_HI] = 0xFF
+	cia.Registers[TA_HI] = 0xFF
+	cia.Registers[TA_LO] = 0xFF
+	cia.Registers[TB_LO] = 0xFF
+	cia.Registers[TB_HI] = 0xFF
 
 	return cia
 }
@@ -155,14 +155,14 @@ func (c *CIA) Update(cycles uint8) *CIAEvent {
 	// Handle timers for each cycle
 	for i := uint8(0); i < cycles; i++ {
 		// Update Timer A if it's counting system clock
-		if c.registers[CRA]&CRA_START != 0 && c.registers[CRA]&CRA_INMODE == 0 {
+		if c.Registers[CRA]&CRA_START != 0 && c.Registers[CRA]&CRA_INMODE == 0 {
 			c.updateTimerA()
 		}
 
 		// Update Timer B if it's counting system clock
-		if c.registers[CRB]&CRB_START != 0 {
+		if c.Registers[CRB]&CRB_START != 0 {
 			// Check Timer B input mode
-			switch c.registers[CRB] & CRB_INMODE {
+			switch c.Registers[CRB] & CRB_INMODE {
 			case 0x00: // System clock
 				c.updateTimerB()
 			case 0x40: // Count Timer A underflows
@@ -187,7 +187,7 @@ func (c *CIA) Update(cycles uint8) *CIAEvent {
 	// Check for interrupts
 	if c.icrData != 0 {
 		// If any enabled interrupt occurred
-		if (c.icrData & c.registers[ICR] & 0x1F) != 0 {
+		if (c.icrData & c.Registers[ICR] & 0x1F) != 0 {
 			c.irq = true
 		}
 		if c.irq {
@@ -205,13 +205,13 @@ func (c *CIA) Update(cycles uint8) *CIAEvent {
 
 func (c *CIA) updateTimerA() {
 	// If timer is not started, return immediately
-	if c.registers[CRA]&CRA_START == 0 {
+	if c.Registers[CRA]&CRA_START == 0 {
 		return
 	}
 
 	// Handle input mode
 	shouldDecrement := false
-	if c.registers[CRA]&CRA_INMODE != 0 {
+	if c.Registers[CRA]&CRA_INMODE != 0 {
 		// CNT mode
 		shouldDecrement = c.cntPos
 	} else {
@@ -229,53 +229,53 @@ func (c *CIA) updateTimerA() {
 	// Check for timer underflow
 	if c.timerA == 0 {
 		// Set interrupt flag
-		if c.registers[ICR]&ICR_TA != 0 {
+		if c.Registers[ICR]&ICR_TA != 0 {
 			//fmt.Println("timer a underflow interrupt")
 			c.icrData |= ICR_TA
 		}
 
 		// Handle PB6 output if enabled
-		if c.registers[CRA]&CRA_PBON != 0 {
-			if c.registers[CRA]&CRA_OUTMODE != 0 {
+		if c.Registers[CRA]&CRA_PBON != 0 {
+			if c.Registers[CRA]&CRA_OUTMODE != 0 {
 				// Toggle mode
-				c.registers[PRB] ^= 0x40 // Toggle bit 6
+				c.Registers[PRB] ^= 0x40 // Toggle bit 6
 			} else {
 				// Pulse mode - set high for one cycle
-				c.registers[PRB] |= 0x40
+				c.Registers[PRB] |= 0x40
 			}
 		}
 
 		// Check run mode
-		if c.registers[CRA]&CRA_RUNMODE != 0 {
+		if c.Registers[CRA]&CRA_RUNMODE != 0 {
 			// One-shot mode: stop timer
-			c.registers[CRA] &= ^CRA_START
+			c.Registers[CRA] &= ^CRA_START
 		}
 
 		// Reload timer from latch
 		c.timerA = c.timerALatch
-	} else if c.registers[CRA]&CRA_PBON != 0 &&
-		c.registers[CRA]&CRA_OUTMODE == 0 {
+	} else if c.Registers[CRA]&CRA_PBON != 0 &&
+		c.Registers[CRA]&CRA_OUTMODE == 0 {
 		// In pulse mode, clear PB6 after one cycle
-		c.registers[PRB] &= ^uint8(0x40)
+		c.Registers[PRB] &= ^uint8(0x40)
 	}
 
 	// Handle forced load
-	if c.registers[CRA]&CRA_FORCE != 0 {
+	if c.Registers[CRA]&CRA_FORCE != 0 {
 		//fmt.Println("timer a force load")
 		c.timerA = c.timerALatch
-		c.registers[CRA] &= ^CRA_FORCE // Clear force load bit
+		c.Registers[CRA] &= ^CRA_FORCE // Clear force load bit
 	}
 }
 
 func (c *CIA) updateTimerB() {
 	// If timer is not started, return immediately
-	if c.registers[CRB]&CRB_START == 0 {
+	if c.Registers[CRB]&CRB_START == 0 {
 		return
 	}
 
 	// Handle different input modes
 	shouldDecrement := false
-	inmode := (c.registers[CRB] & CRB_INMODE) >> 5 // Extract input mode bits
+	inmode := (c.Registers[CRB] & CRB_INMODE) >> 5 // Extract input mode bits
 
 	switch inmode {
 	case 0: // Count CPU cycles
@@ -299,44 +299,44 @@ func (c *CIA) updateTimerB() {
 	// Check for timer underflow
 	if c.timerB == 0 {
 		// Set interrupt flag
-		if c.registers[ICR]&ICR_TB != 0 {
+		if c.Registers[ICR]&ICR_TB != 0 {
 			c.icrData |= ICR_TB
 		}
 
 		// Handle PB7 output if enabled
-		if c.registers[CRB]&CRB_PBON != 0 {
-			if c.registers[CRB]&CRB_OUTMODE != 0 {
+		if c.Registers[CRB]&CRB_PBON != 0 {
+			if c.Registers[CRB]&CRB_OUTMODE != 0 {
 				// Toggle mode
-				c.registers[PRB] ^= 0x80 // Toggle bit 7
+				c.Registers[PRB] ^= 0x80 // Toggle bit 7
 			} else {
 				// Pulse mode - set high for one cycle
-				c.registers[PRB] |= 0x80
+				c.Registers[PRB] |= 0x80
 			}
 		}
 
 		// Check run mode
-		if c.registers[CRB]&CRB_RUNMODE != 0 {
+		if c.Registers[CRB]&CRB_RUNMODE != 0 {
 			// One-shot mode: stop timer
-			c.registers[CRB] &= ^CRB_START
+			c.Registers[CRB] &= ^CRB_START
 		}
 
 		// Reload timer from latch
 		c.timerB = c.timerBLatch
-	} else if c.registers[CRB]&CRB_PBON != 0 &&
-		c.registers[CRB]&CRB_OUTMODE == 0 {
+	} else if c.Registers[CRB]&CRB_PBON != 0 &&
+		c.Registers[CRB]&CRB_OUTMODE == 0 {
 		// In pulse mode, clear PB7 after one cycle
-		c.registers[PRB] &= ^uint8(0x80)
+		c.Registers[PRB] &= ^uint8(0x80)
 	}
 
 	// Handle forced load
-	if c.registers[CRB]&CRB_FORCE != 0 {
+	if c.Registers[CRB]&CRB_FORCE != 0 {
 		c.timerB = c.timerBLatch
-		c.registers[CRB] &= ^CRB_FORCE // Clear force load bit
+		c.Registers[CRB] &= ^CRB_FORCE // Clear force load bit
 	}
 }
 
 func (c *CIA) todPeriod() uint16 {
-	if c.registers[CRA]&CRA_TODIN != 0 {
+	if c.Registers[CRA]&CRA_TODIN != 0 {
 		return 20000 // 50Hz = 20ms
 	}
 	return 16667 // 60Hz = 16.67ms
@@ -344,33 +344,33 @@ func (c *CIA) todPeriod() uint16 {
 
 func (c *CIA) updateTOD() {
 	// Add 1 to tenths in BCD
-	c.registers[TOD_10THS] = (c.registers[TOD_10THS] + 1) & 0x0F
-	if c.registers[TOD_10THS] > 0x09 {
-		c.registers[TOD_10THS] = 0x00
+	c.Registers[TOD_10THS] = (c.Registers[TOD_10THS] + 1) & 0x0F
+	if c.Registers[TOD_10THS] > 0x09 {
+		c.Registers[TOD_10THS] = 0x00
 
 		// Add 1 to seconds in BCD
-		if (c.registers[TOD_SEC] & 0x0F) == 0x09 {
-			c.registers[TOD_SEC] = c.registers[TOD_SEC] + 0x10 - 0x09
+		if (c.Registers[TOD_SEC] & 0x0F) == 0x09 {
+			c.Registers[TOD_SEC] = c.Registers[TOD_SEC] + 0x10 - 0x09
 		} else {
-			c.registers[TOD_SEC] = c.registers[TOD_SEC] + 0x01
+			c.Registers[TOD_SEC] = c.Registers[TOD_SEC] + 0x01
 		}
 
-		if c.registers[TOD_SEC] > 0x59 {
-			c.registers[TOD_SEC] = 0x00
+		if c.Registers[TOD_SEC] > 0x59 {
+			c.Registers[TOD_SEC] = 0x00
 
 			// Add 1 to minutes in BCD
-			if (c.registers[TOD_MIN] & 0x0F) == 0x09 {
-				c.registers[TOD_MIN] = c.registers[TOD_MIN] + 0x10 - 0x09
+			if (c.Registers[TOD_MIN] & 0x0F) == 0x09 {
+				c.Registers[TOD_MIN] = c.Registers[TOD_MIN] + 0x10 - 0x09
 			} else {
-				c.registers[TOD_MIN] = c.registers[TOD_MIN] + 0x01
+				c.Registers[TOD_MIN] = c.Registers[TOD_MIN] + 0x01
 			}
 
-			if c.registers[TOD_MIN] > 0x59 {
-				c.registers[TOD_MIN] = 0x00
+			if c.Registers[TOD_MIN] > 0x59 {
+				c.Registers[TOD_MIN] = 0x00
 
 				// Hours are special (1-12 with PM bit)
-				hours := c.registers[TOD_HR] & 0x1F
-				pmBit := c.registers[TOD_HR] & 0x80
+				hours := c.Registers[TOD_HR] & 0x1F
+				pmBit := c.Registers[TOD_HR] & 0x80
 
 				if hours == 0x11 {
 					// Going from 11 to 12
@@ -387,17 +387,17 @@ func (c *CIA) updateTOD() {
 					hours = hours + 0x01
 				}
 
-				c.registers[TOD_HR] = hours | pmBit
+				c.Registers[TOD_HR] = hours | pmBit
 			}
 		}
 	}
 
 	// Check for alarm match
-	if c.registers[TOD_10THS] == c.todAlarm[0] &&
-		c.registers[TOD_SEC] == c.todAlarm[1] &&
-		c.registers[TOD_MIN] == c.todAlarm[2] &&
-		c.registers[TOD_HR] == c.todAlarm[3] {
-		if c.registers[ICR]&ICR_TOD != 0 {
+	if c.Registers[TOD_10THS] == c.todAlarm[0] &&
+		c.Registers[TOD_SEC] == c.todAlarm[1] &&
+		c.Registers[TOD_MIN] == c.todAlarm[2] &&
+		c.Registers[TOD_HR] == c.todAlarm[3] {
+		if c.Registers[ICR]&ICR_TOD != 0 {
 			c.icrData |= ICR_TOD
 		}
 	}
@@ -408,14 +408,14 @@ func (c *CIA) WriteRegister(reg uint8, val uint8) {
 	switch reg {
 	case PRA:
 		slog.Info(fmt.Sprintf("write port a %x\n", val))
-		c.registers[PRA] = val
+		c.Registers[PRA] = val
 	case PRB:
 		//slog.Info("write port b %x\n", val)
-		c.registers[PRB] = val
+		c.Registers[PRB] = val
 	case DDRA:
-		c.registers[DDRA] = val
+		c.Registers[DDRA] = val
 	case DDRB:
-		c.registers[DDRB] = val
+		c.Registers[DDRB] = val
 	case TA_LO:
 		c.timerALatch = (c.timerALatch & 0xFF00) | uint16(val)
 		slog.Info(fmt.Sprintf("TA_LO %x\n", val))
@@ -431,22 +431,22 @@ func (c *CIA) WriteRegister(reg uint8, val uint8) {
 		c.timerBLatch = (c.timerBLatch & 0x00FF) | (uint16(val) << 8)
 		c.timerB = c.timerBLatch
 	case TOD_10THS:
-		if c.registers[CRB]&CRB_ALARM != 0 {
+		if c.Registers[CRB]&CRB_ALARM != 0 {
 			c.todAlarm[0] = val & 0x0F // Only lower 4 bits valid
 		} else {
-			c.registers[TOD_10THS] = val & 0x0F
+			c.Registers[TOD_10THS] = val & 0x0F
 		}
 	case TOD_SEC:
-		if c.registers[CRB]&CRB_ALARM != 0 {
+		if c.Registers[CRB]&CRB_ALARM != 0 {
 			c.todAlarm[1] = val & 0x7F // Only 7 bits valid
 		} else {
-			c.registers[TOD_SEC] = val & 0x7F
+			c.Registers[TOD_SEC] = val & 0x7F
 		}
 	case TOD_MIN:
-		if c.registers[CRB]&CRB_ALARM != 0 {
+		if c.Registers[CRB]&CRB_ALARM != 0 {
 			c.todAlarm[2] = val & 0x7F // Only 7 bits valid
 		} else {
-			c.registers[TOD_MIN] = val & 0x7F
+			c.Registers[TOD_MIN] = val & 0x7F
 		}
 	case TOD_HR:
 		// Convert 0 to 12
@@ -454,13 +454,13 @@ func (c *CIA) WriteRegister(reg uint8, val uint8) {
 		if hours == 0 {
 			hours = 0x12
 		}
-		if c.registers[CRB]&CRB_ALARM != 0 {
+		if c.Registers[CRB]&CRB_ALARM != 0 {
 			c.todAlarm[3] = hours | (val & 0x80) // Keep AM/PM bit
 		} else {
-			c.registers[TOD_HR] = hours | (val & 0x80)
+			c.Registers[TOD_HR] = hours | (val & 0x80)
 		}
 	case SDR:
-		c.registers[SDR] = val
+		c.Registers[SDR] = val
 	case ICR:
 		c.writeICR(val)
 	case CRA:
@@ -474,22 +474,22 @@ func (c *CIA) writeICR(val uint8) {
 	slog.Info(fmt.Sprintf("write icr %x\n", val))
 	if val&ICR_SET != 0 {
 		// Set interrupt mask bits
-		c.registers[ICR] |= val & 0x1F
+		c.Registers[ICR] |= val & 0x1F
 	} else {
 		// Clear interrupt mask bits
-		c.registers[ICR] &= ^(val & 0x1F)
+		c.Registers[ICR] &= ^(val & 0x1F)
 	}
 }
 
 func (c *CIA) writeCRA(val uint8) {
 	slog.Info(fmt.Sprintf("write cra %x\n", val))
-	oldStart := c.registers[CRA] & CRA_START
-	c.registers[CRA] = val
+	oldStart := c.Registers[CRA] & CRA_START
+	c.Registers[CRA] = val
 
 	// Handle timer force load
 	if val&CRA_FORCE != 0 {
 		c.timerA = c.timerALatch
-		c.registers[CRA] &= ^CRA_FORCE // Clear force load bit
+		c.Registers[CRA] &= ^CRA_FORCE // Clear force load bit
 	}
 
 	// Handle timer start/stop
@@ -511,13 +511,13 @@ func (c *CIA) writeCRA(val uint8) {
 }
 
 func (c *CIA) writeCRB(val uint8) {
-	oldStart := c.registers[CRB] & CRB_START
-	c.registers[CRB] = val
+	oldStart := c.Registers[CRB] & CRB_START
+	c.Registers[CRB] = val
 
 	// Handle timer force load
 	if val&CRB_FORCE != 0 {
 		c.timerB = c.timerBLatch
-		c.registers[CRB] &= ^CRB_FORCE // Clear force load bit
+		c.Registers[CRB] &= ^CRB_FORCE // Clear force load bit
 	}
 
 	// Handle timer start/stop
@@ -530,10 +530,10 @@ func (c *CIA) writeCRB(val uint8) {
 
 	// Handle TOD alarm/clock mode
 	if val&CRB_ALARM != 0 {
-		// Writing to TOD registers sets alarm time
+		// Writing to TOD Registers sets alarm time
 		c.todMode = TOD_ALARM
 	} else {
-		// Writing to TOD registers sets clock time
+		// Writing to TOD Registers sets clock time
 		c.todMode = TOD_CLOCK
 	}
 }
@@ -545,9 +545,9 @@ func (c *CIA) ReadRegister(reg uint8) uint8 {
 	case PRB:
 		return c.readPortB()
 	case DDRA:
-		return c.registers[DDRA]
+		return c.Registers[DDRA]
 	case DDRB:
-		return c.registers[DDRB]
+		return c.Registers[DDRB]
 	case TA_LO:
 		return uint8(c.timerA & 0xFF)
 	case TA_HI:
@@ -557,21 +557,21 @@ func (c *CIA) ReadRegister(reg uint8) uint8 {
 	case TB_HI:
 		return uint8(c.timerB >> 8)
 	case TOD_10THS:
-		return c.registers[TOD_10THS]
+		return c.Registers[TOD_10THS]
 	case TOD_SEC:
-		return c.registers[TOD_SEC]
+		return c.Registers[TOD_SEC]
 	case TOD_MIN:
-		return c.registers[TOD_MIN]
+		return c.Registers[TOD_MIN]
 	case TOD_HR:
-		return c.registers[TOD_HR]
+		return c.Registers[TOD_HR]
 	case SDR:
-		return c.registers[SDR]
+		return c.Registers[SDR]
 	case ICR:
 		return c.readICR()
 	case CRA:
-		return c.registers[CRA]
+		return c.Registers[CRA]
 	case CRB:
-		return c.registers[CRB]
+		return c.Registers[CRB]
 	}
 	return 0
 }
@@ -586,14 +586,14 @@ func (c *CIA) readPortA() uint8 {
 	slog.Info(fmt.Sprintf("read port a %x\n", inputValues))
 
 	// For output bits, use port register value, for input bits use external value
-	return (c.registers[PRA] & c.registers[DDRA]) | (inputValues & ^c.registers[DDRA])
+	return (c.Registers[PRA] & c.Registers[DDRA]) | (inputValues & ^c.Registers[DDRA])
 }
 
 func (c *CIA) getPortAInput() uint8 {
 	fmt.Println("getPortAInput")
 	//if c.KB != nil {
 	//	// Get keyboard state based on currently selected rows
-	//	return c.KB.GetState(c.registers[PRA])
+	//	return c.KB.GetState(c.Registers[PRA])
 	//	// XXX: joystick.
 	//}
 
@@ -601,7 +601,7 @@ func (c *CIA) getPortAInput() uint8 {
 	// cia2 - rs232, bank selection.
 	// VIC bank bits (0-1) are special - they're always readable
 	// regardless of DDRA, and they're inverted
-	vicBankBits := c.registers[PRA] & 0x03
+	vicBankBits := c.Registers[PRA] & 0x03
 	return ^vicBankBits & 0x03
 }
 
@@ -613,8 +613,8 @@ func (c *CIA) readPortB() uint8 {
 	var timerOutputs uint8 = 0
 
 	// If Timer A output enabled, handle PB6
-	if c.registers[CRA]&CRA_PBON != 0 {
-		if c.registers[CRA]&CRA_OUTMODE != 0 {
+	if c.Registers[CRA]&CRA_PBON != 0 {
+		if c.Registers[CRA]&CRA_OUTMODE != 0 {
 			// Toggle mode - use current toggle state
 			if c.timerAOutput {
 				timerOutputs |= 0x40
@@ -628,8 +628,8 @@ func (c *CIA) readPortB() uint8 {
 	}
 
 	// If Timer B output enabled, handle PB7
-	if c.registers[CRB]&CRB_PBON != 0 {
-		if c.registers[CRB]&CRB_OUTMODE != 0 {
+	if c.Registers[CRB]&CRB_PBON != 0 {
+		if c.Registers[CRB]&CRB_OUTMODE != 0 {
 			// Toggle mode - use current toggle state
 			if c.timerBOutput {
 				timerOutputs |= 0x80
@@ -646,7 +646,7 @@ func (c *CIA) readPortB() uint8 {
 	// - Port register values for output bits (masked by DDRB)
 	// - Input values for input bits (masked by inverted DDRB)
 	// - Timer outputs (overriding bits 6-7 if enabled)
-	return (c.registers[PRB] & c.registers[DDRB]) | (inputValues & ^c.registers[DDRB]) | timerOutputs
+	return (c.Registers[PRB] & c.Registers[DDRB]) | (inputValues & ^c.Registers[DDRB]) | timerOutputs
 }
 
 // CIA1 Port B is used for:
@@ -679,7 +679,7 @@ func (c *CIA) readPortB() uint8 {
 func (c *CIA) getPortBInput() uint8 {
 	if c.KB != nil {
 		// Get keyboard state based on currently selected rows
-		v := c.KB.GetState(c.registers[PRA])
+		v := c.KB.GetState(c.Registers[PRA])
 		slog.Info(fmt.Sprintf("getPortBInput %x\n", v))
 		return v
 		// XXX: joystick.
@@ -711,7 +711,7 @@ func (c *CIA) readICR() uint8 {
 	value := c.icrData
 
 	// Bit 7 indicates if any enabled interrupt occurred
-	if (c.icrData & c.registers[ICR] & 0x1F) != 0 {
+	if (c.icrData & c.Registers[ICR] & 0x1F) != 0 {
 		value |= 0x80
 	}
 

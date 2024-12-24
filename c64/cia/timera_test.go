@@ -10,9 +10,9 @@ func TestTimerAInitialization(t *testing.T) {
 	cia := NewCIA()
 	assert := assert.New(t)
 
-	assert.Equal(uint16(0xFFFF), cia.registers.timerALatch, "Timer A latch should initialize to 0xFFFF")
-	assert.Equal(uint16(0xFFFF), cia.registers.timerA, "Timer A counter should initialize to 0xFFFF")
-	assert.Equal(uint8(0), cia.registers.cra, "CRA should initialize to 0")
+	assert.Equal(uint16(0xFFFF), cia.Registers.timerALatch, "Timer A latch should initialize to 0xFFFF")
+	assert.Equal(uint16(0xFFFF), cia.Registers.timerA, "Timer A counter should initialize to 0xFFFF")
+	assert.Equal(uint8(0), cia.Registers.cra, "CRA should initialize to 0")
 }
 
 func TestTimerALatchLoad(t *testing.T) {
@@ -52,7 +52,7 @@ func TestTimerALatchLoad(t *testing.T) {
 			cia.WriteRegister(TA_LO, tc.low)
 			cia.WriteRegister(TA_HI, tc.high)
 
-			assert.Equal(tc.expected, cia.registers.timerALatch, "Timer A latch should be set correctly")
+			assert.Equal(tc.expected, cia.Registers.timerALatch, "Timer A latch should be set correctly")
 		})
 	}
 }
@@ -67,8 +67,8 @@ func TestTimerAForceLoad(t *testing.T) {
 
 	// Force load and verify
 	cia.WriteRegister(CRA, CRA_FORCE)
-	assert.Equal(uint16(0x1234), cia.registers.timerA, "Timer should be force loaded")
-	assert.Equal(uint8(0), cia.registers.cra&CRA_FORCE, "Force bit should clear automatically")
+	assert.Equal(uint16(0x1234), cia.Registers.timerA, "Timer should be force loaded")
+	assert.Equal(uint8(0), cia.Registers.cra&CRA_FORCE, "Force bit should clear automatically")
 }
 
 func TestTimerAContinuousMode(t *testing.T) {
@@ -108,7 +108,7 @@ func TestTimerAContinuousMode(t *testing.T) {
 			cia.WriteRegister(CRA, CRA_START)
 
 			cia.Update(tc.cycles)
-			assert.Equal(tc.expectedValue, cia.registers.timerA)
+			assert.Equal(tc.expectedValue, cia.Registers.timerA)
 		})
 	}
 }
@@ -124,11 +124,11 @@ func TestTimerAOneShotMode(t *testing.T) {
 
 	// Run until underflow
 	cia.Update(2)
-	assert.Equal(uint16(0x0002), cia.registers.timerA, "Timer should count down to 0")
+	assert.Equal(uint16(0x0002), cia.Registers.timerA, "Timer should count down to 0")
 
 	// Verify timer stopped
 	cia.Update(1)
-	assert.Equal(uint8(0), cia.registers.cra&CRA_START, "Timer should stop in one-shot mode")
+	assert.Equal(uint8(0), cia.Registers.cra&CRA_START, "Timer should stop in one-shot mode")
 }
 
 func TestTimerAInterrupt(t *testing.T) {
@@ -284,14 +284,14 @@ func TestTimerAStop(t *testing.T) {
 
 	// Run for 2 cycles
 	cia.Update(2)
-	initialValue := cia.registers.timerA
+	initialValue := cia.Registers.timerA
 
 	// Stop timer
 	cia.WriteRegister(CRA, 0)
 
 	// Run more cycles
 	cia.Update(2)
-	assert.Equal(initialValue, cia.registers.timerA, "Timer should not count when stopped")
+	assert.Equal(initialValue, cia.Registers.timerA, "Timer should not count when stopped")
 }
 
 func TestTimerAReload(t *testing.T) {
@@ -307,7 +307,7 @@ func TestTimerAReload(t *testing.T) {
 	cia.Update(3)
 
 	// Verify reload from latch
-	assert.Equal(uint16(0x0003), cia.registers.timerA, "Timer should reload from latch after underflow")
+	assert.Equal(uint16(0x0003), cia.Registers.timerA, "Timer should reload from latch after underflow")
 }
 
 func TestTimerAReadRegister(t *testing.T) {
@@ -344,7 +344,7 @@ func TestTimerAReadRegister(t *testing.T) {
 			cia := NewCIA()
 			assert := assert.New(t)
 
-			cia.registers.timerA = tc.value
+			cia.Registers.timerA = tc.value
 
 			lowByte := cia.ReadRegister(TA_LO)
 			highByte := cia.ReadRegister(TA_HI)

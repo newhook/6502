@@ -17,23 +17,23 @@ func TestInterrupts(t *testing.T) {
 		cia.WriteRegister(TA_HI, 0x00)
 
 		// Verify timer is loaded with correct value
-		assert.Equal(t, uint16(0x0002), cia.registers.timerA)
+		assert.Equal(t, uint16(0x0002), cia.Registers.timerA)
 
 		// Start Timer A in one-shot mode
 		cia.WriteRegister(CRA, CRA_START|CRA_RUNMODE)
 
 		// First cycle - should decrement to 1
 		cia.Update(1)
-		assert.Equal(t, uint16(0x0001), cia.registers.timerA)
-		assert.Equal(t, uint8(0), cia.registers.icrData&ICR_TA)
+		assert.Equal(t, uint16(0x0001), cia.Registers.timerA)
+		assert.Equal(t, uint8(0), cia.Registers.icrData&ICR_TA)
 
 		// Second cycle - should decrement to 0 and trigger interrupt
 		cia.Update(1)
-		assert.Equal(t, uint16(0x0002), cia.registers.timerA)
-		assert.Equal(t, ICR_TA, cia.registers.icrData&ICR_TA)
+		assert.Equal(t, uint16(0x0002), cia.Registers.timerA)
+		assert.Equal(t, ICR_TA, cia.Registers.icrData&ICR_TA)
 
 		// Verify timer stopped (one-shot mode)
-		assert.Equal(t, uint8(0), cia.registers.cra&CRA_START)
+		assert.Equal(t, uint8(0), cia.Registers.cra&CRA_START)
 
 		// Reading ICR should clear interrupts and return correct flags
 		irqBefore := cia.ReadRegister(ICR)

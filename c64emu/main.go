@@ -1,12 +1,13 @@
 package main
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/newhook/6502/c64/c64"
-	"github.com/newhook/6502/mon/monitor"
 	"log"
 	"log/slog"
 	"os"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/newhook/6502/c64/c64"
+	"github.com/newhook/6502/mon/monitor"
 )
 
 func main() {
@@ -45,7 +46,7 @@ func main() {
 		// Reset vector
 		computer.CPU.PC = uint16(mem.Read(0xFFFC)) | uint16(mem.Read(0xFFFD))<<8
 
-		m := monitor.NewMonitor(computer, computer.CPU, computer.Memory)
+		m := monitor.NewMonitor(computer, computer.CPU, computer.Memory, computer.CIA1, computer.CIA2, computer.VIC)
 		logger := slog.New(slog.NewTextHandler(m, nil))
 		slog.SetDefault(logger)
 		p := tea.NewProgram(m)

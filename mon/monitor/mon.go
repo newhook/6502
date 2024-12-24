@@ -2,14 +2,17 @@ package monitor
 
 import (
 	"fmt"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/newhook/6502/cpu"
-	"github.com/newhook/6502/dis/disassembler"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/newhook/6502/c64/cia"
+	"github.com/newhook/6502/c64/vic"
+	"github.com/newhook/6502/cpu"
+	"github.com/newhook/6502/dis/disassembler"
 )
 
 // CPUState holds a snapshot of CPU state
@@ -36,6 +39,9 @@ type Monitor struct {
 	stepper          Stepper
 	mem              cpu.MemoryBus
 	cpu              *cpu.CPU
+	cia1             *cia.CIA
+	cia2             *cia.CIA
+	vic              *vic.VIC
 	paused           bool
 	width            int
 	height           int
@@ -45,6 +51,8 @@ type Monitor struct {
 
 	lastState  CPUState  // Previous CPU state for change detection
 	lastMemory [64]uint8 // Only track visible memory (8 rows * 8 bytes)
+	lastCIA1   [16]uint8 // Last state of CIA1 registers
+	lastCIA2   [16]uint8 // Last state of CIA2 registers
 
 	memoryAddress uint16 // Start address for memory view
 	activePane    string // "disasm", "memory"
@@ -116,7 +124,7 @@ type Stepper interface {
 }
 
 // Initialize the monitor
-func NewMonitor(stepper Stepper, cpu *cpu.CPU, mem cpu.MemoryBus) *Monitor {
+func NewMonitor(stepper Stepper, cpu *cpu.CPU, mem cpu.MemoryBus, cia1 *cia.CIA, cia2 *cia.CIA, vic *vic.VIC) *Monitor {
 	ti := textinput.New()
 	ti.Placeholder = "Enter hex address (e.g. FF00)"
 	ti.CharLimit = 4
@@ -126,6 +134,9 @@ func NewMonitor(stepper Stepper, cpu *cpu.CPU, mem cpu.MemoryBus) *Monitor {
 		stepper:         stepper,
 		mem:             mem,
 		cpu:             cpu,
+		cia1:            cia1,
+		cia2:            cia2,
+		vic:             vic,
 		paused:          true,
 		locations:       disassembler.DisassembleInstructions(mem),
 		memoryAddress:   0,
@@ -275,6 +286,7 @@ func (m Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			P:  m.cpu.P,
 		}
 		m.captureMemoryState()
+		m.captureCIAState() // Capture CIA state
 
 		// Execute step
 		m.stepper.Step()
@@ -330,6 +342,7 @@ func (m Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				P:  m.cpu.P,
 			}
 			m.captureMemoryState()
+			m.captureCIAState() // Capture CIA state
 
 			// Execute step until we hit a breakpoint
 			for {
@@ -363,6 +376,7 @@ func (m Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					P:  m.cpu.P,
 				}
 				m.captureMemoryState()
+				m.captureCIAState() // Capture CIA state
 				m.stepper.Step()
 				m.relocate()
 			}
@@ -542,16 +556,133 @@ func (m Monitor) formatStack() string {
 	return result.String()
 }
 
+func formatBitfield(value uint8, bitNames map[uint8]string) string {
+	var result strings.Builder
+	for bit, name := range bitNames {
+		if value&bit != 0 {
+			result.WriteString(fmt.Sprintf("%s: 1\n", name))
+		} else {
+			result.WriteString(fmt.Sprintf("%s: 0\n", name))
+		}
+	}
+	return result.String()
+}
+
+func (m Monitor) formatCIA(c *cia.CIA, lastState [16]uint8) string {
+	// Right column: CIA1, CIA2, and VIC-II
+	registerNames := map[int]string{
+		cia.PRA:       "PRA",
+		cia.PRB:       "PRB",
+		cia.DDRA:      "DDRA",
+		cia.DDRB:      "DDRB",
+		cia.TA_LO:     "TA_LO",
+		cia.TA_HI:     "TA_HI",
+		cia.TB_LO:     "TB_LO",
+		cia.TB_HI:     "TB_HI",
+		cia.TOD_10THS: "TOD_10",
+		cia.TOD_SEC:   "TOD_SEC",
+		cia.TOD_MIN:   "TOD_MIN",
+		cia.TOD_HR:    "TOD_HR",
+		cia.SDR:       "SDR",
+		cia.ICR:       "ICR",
+		cia.CRA:       "CRA",
+		cia.CRB:       "CRB",
+	}
+
+	var cia1Details strings.Builder
+	cia1Details.WriteString("CIA1\n\n")
+	for i := 0; i < len(c.Registers); i += 3 {
+		// Get the first register
+		name1, reg1 := registerNames[i], c.Registers[i]
+		line := fmt.Sprintf("%-8s: $%02X", name1, reg1)
+		if reg1 != lastState[i] {
+			line = changedStyle.Render(line)
+		}
+
+		// Check if there's a second register
+		if i+1 < len(c.Registers) {
+			name2, reg2 := registerNames[i+1], c.Registers[i+1]
+			part := fmt.Sprintf("    %-8s: $%02X", name2, reg2)
+			if reg2 != lastState[i+1] {
+				part = changedStyle.Render(part)
+			}
+			line += part
+		}
+
+		if i+2 < len(c.Registers) {
+			name3, reg3 := registerNames[i+2], c.Registers[i+2]
+			part := fmt.Sprintf("    %-8s: $%02X", name3, reg3)
+			if reg3 != lastState[i+2] {
+				part = changedStyle.Render(part)
+			}
+			line += part
+		}
+
+		cia1Details.WriteString(line + "\n")
+	}
+
+	// Add bitfield details for ICR, CRA, and CRB
+	if false {
+		cia1Details.WriteString("\nICR:\n")
+		cia1Details.WriteString(formatBitfield(c.Registers[cia.ICR], map[uint8]string{
+			cia.ICR_TA:   "Timer A Interrupt",
+			cia.ICR_TB:   "Timer B Interrupt",
+			cia.ICR_TOD:  "TOD Alarm Interrupt",
+			cia.ICR_SDR:  "Serial Port Interrupt",
+			cia.ICR_FLAG: "FLAG Line Interrupt",
+			cia.ICR_SET:  "Set/Clear Flag",
+		}))
+
+		cia1Details.WriteString("\nCRA:\n")
+		cia1Details.WriteString(formatBitfield(c.Registers[cia.CRA], map[uint8]string{
+			cia.CRA_START:   "Start Timer A",
+			cia.CRA_PBON:    "Timer A Output on PB6",
+			cia.CRA_OUTMODE: "Timer A Output Mode",
+			cia.CRA_RUNMODE: "Timer A Run Mode",
+			cia.CRA_FORCE:   "Force Timer A Load",
+			cia.CRA_INMODE:  "Timer A Input Mode",
+			cia.CRA_SPMODE:  "Serial Port Mode",
+			cia.CRA_TODIN:   "TOD Frequency",
+		}))
+
+		cia1Details.WriteString("\nCRB:\n")
+		cia1Details.WriteString(formatBitfield(c.Registers[cia.CRB], map[uint8]string{
+			cia.CRB_START:   "Start Timer B",
+			cia.CRB_PBON:    "Timer B Output on PB7",
+			cia.CRB_OUTMODE: "Timer B Output Mode",
+			cia.CRB_RUNMODE: "Timer B Run Mode",
+			cia.CRB_FORCE:   "Force Timer B Load",
+			cia.CRB_INMODE:  "Timer B Input Mode",
+			cia.CRB_ALARM:   "TOD Alarm",
+		}))
+	}
+	return cia1Details.String()
+}
+
 func (m Monitor) View() string {
 	// Set column widths
-	leftColumnWidth := 40  // Fixed width for CPU state and disassembly
-	rightColumnWidth := 50 // Fixed width for stack and memory
+	leftColumnWidth := 40   // Fixed width for CPU state and disassembly
+	middleColumnWidth := 50 // Fixed width for stack and memory
+	rightColumnWidth := 50  // Fixed width for cia1, cia2, and vic-ii
 
 	// Update style widths
 	infoStyle = infoStyle.Width(leftColumnWidth)
 	disasmStyle = disasmStyle.Width(leftColumnWidth)
-	stackStyle = stackStyle.Width(rightColumnWidth)
-	memoryStyle = memoryStyle.Width(rightColumnWidth)
+	stackStyle = stackStyle.Width(middleColumnWidth)
+	memoryStyle = memoryStyle.Width(middleColumnWidth)
+
+	// Define styles for the new panels
+	ciaStyle := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(special).
+		Padding(1).
+		Width(rightColumnWidth)
+
+	vicStyle := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(special).
+		Padding(1).
+		Width(rightColumnWidth)
 
 	// Left column: CPU state and disassembly
 	cpuState := infoStyle.Render(fmt.Sprintf(
@@ -575,7 +706,7 @@ func (m Monitor) View() string {
 		disasm,
 	)
 
-	// Right column: Stack and memory
+	// Middle column: Stack and memory
 	stack := stackStyle.Render(fmt.Sprintf(
 		"Stack\n\n%s",
 		m.formatStack(),
@@ -586,10 +717,21 @@ func (m Monitor) View() string {
 		m.formatMemory(),
 	))
 
-	rightColumn := lipgloss.JoinVertical(
+	middleColumn := lipgloss.JoinVertical(
 		lipgloss.Left,
 		stack,
 		memory,
+	)
+
+	cia1 := ciaStyle.Render(m.formatCIA(m.cia1, m.lastCIA1))
+	cia2 := ciaStyle.Render(m.formatCIA(m.cia2, m.lastCIA2))
+	vic := vicStyle.Render("VIC-II\n\n<vic-ii details here>")
+
+	rightColumn := lipgloss.JoinVertical(
+		lipgloss.Left,
+		cia1,
+		cia2,
+		vic,
 	)
 
 	// Help section at the bottom
@@ -609,6 +751,7 @@ func (m Monitor) View() string {
 	content := lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		leftColumn,
+		lipgloss.PlaceHorizontal(3, lipgloss.Left, middleColumn),
 		lipgloss.PlaceHorizontal(3, lipgloss.Left, rightColumn),
 	)
 
@@ -647,4 +790,9 @@ func (m Monitor) View() string {
 		outputWindow,
 		help,
 	)
+}
+
+func (m *Monitor) captureCIAState() {
+	copy(m.lastCIA1[:], m.cia1.Registers[:])
+	copy(m.lastCIA2[:], m.cia2.Registers[:])
 }
