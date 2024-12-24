@@ -57,6 +57,34 @@ var SDLKeyMapping = map[sdl.Scancode]Key{
 	sdl.SCANCODE_BACKSPACE: {0, 0, "DEL"},
 	sdl.SCANCODE_HOME:      {6, 3, "CLR/HOME"},
 	sdl.SCANCODE_INSERT:    {0, 0, "INST/DEL"}, // Same as backspace
+
+	sdl.SCANCODE_COMMA:        {5, 7, "COMMA"},
+	sdl.SCANCODE_PERIOD:       {5, 4, "PERIOD"},
+	sdl.SCANCODE_SEMICOLON:    {6, 2, "SEMICOLON"},
+	sdl.SCANCODE_SLASH:        {6, 7, "SLASH"},
+	sdl.SCANCODE_EQUALS:       {6, 5, "EQUALS"},
+	sdl.SCANCODE_MINUS:        {5, 3, "MINUS"},
+	sdl.SCANCODE_APOSTROPHE:   {7, 3, "QUOTE"},
+	sdl.SCANCODE_BACKSLASH:    {6, 6, "LEFT ARROW"},
+	sdl.SCANCODE_LEFTBRACKET:  {5, 6, "AT"},       // @ symbol
+	sdl.SCANCODE_RIGHTBRACKET: {6, 1, "ASTERISK"}, // *
+	sdl.SCANCODE_GRAVE:        {7, 1, "POUND"},    // £ symbol
+	sdl.SCANCODE_UP:           {6, 6, "UP ARROW"}, // ↑
+
+	// Function keys
+	sdl.SCANCODE_F1: {0, 4, "F1"},
+	sdl.SCANCODE_F3: {0, 5, "F3"},
+	sdl.SCANCODE_F5: {0, 6, "F5"},
+	sdl.SCANCODE_F7: {0, 3, "F7"},
+
+	// F2, F4, F6, F8 are SHIFT + F1, F3, F5, F7
+
+	// Additional special keys
+	sdl.SCANCODE_LALT:   {7, 5, "COMMODORE"}, // Using Left Alt as Commodore key
+	sdl.SCANCODE_ESCAPE: {7, 7, "RUN/STOP"},  // Using ESC as RUN/STOP
+	// Note: RESTORE key is typically handled specially as it's connected to the NMI line
+	//sdl.SCANCODE_PLUS:  {5, 0, "PLUS"},
+	//sdl.SCANCODE_COLON: {5, 5, "COLON"},
 }
 
 // KeyMatrix represents the C64's 8x8 keyboard matrix
