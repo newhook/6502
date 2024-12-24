@@ -181,17 +181,6 @@ const (
 	MODE_EXTENDED_TEXT
 )
 
-type Sprite struct {
-	enabled    bool
-	xPos       uint16
-	yPos       uint8
-	multicolor bool
-	expandX    bool
-	expandY    bool
-	dmaCount   uint8
-	dataPtr    uint16
-}
-
 func NewVIC(mem *memory.Manager) *VIC {
 	vic := &VIC{
 		mem:           mem,
