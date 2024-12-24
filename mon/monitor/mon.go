@@ -589,8 +589,8 @@ func (m Monitor) formatCIA(c *cia.CIA, lastState [16]uint8) string {
 		cia.CRB:       "CRB",
 	}
 
-	var cia1Details strings.Builder
-	cia1Details.WriteString("CIA1\n\n")
+	var ciaDetails strings.Builder
+	ciaDetails.WriteString("CIA\n\n")
 	for i := 0; i < len(c.Registers); i += 3 {
 		// Get the first register
 		name1, reg1 := registerNames[i], c.Registers[i]
@@ -618,13 +618,17 @@ func (m Monitor) formatCIA(c *cia.CIA, lastState [16]uint8) string {
 			line += part
 		}
 
-		cia1Details.WriteString(line + "\n")
+		ciaDetails.WriteString(line + "\n")
 	}
+
+	// Add timer details
+	ciaDetails.WriteString(fmt.Sprintf("\nTimer A: %04X Latch: %04X\n", c.TimerA, c.TimerALatch))
+	ciaDetails.WriteString(fmt.Sprintf("Timer B: %04X Latch: %04X\n", c.TimerB, c.TimerBLatch))
 
 	// Add bitfield details for ICR, CRA, and CRB
 	if false {
-		cia1Details.WriteString("\nICR:\n")
-		cia1Details.WriteString(formatBitfield(c.Registers[cia.ICR], map[uint8]string{
+		ciaDetails.WriteString("\nICR:\n")
+		ciaDetails.WriteString(formatBitfield(c.Registers[cia.ICR], map[uint8]string{
 			cia.ICR_TA:   "Timer A Interrupt",
 			cia.ICR_TB:   "Timer B Interrupt",
 			cia.ICR_TOD:  "TOD Alarm Interrupt",
@@ -633,8 +637,8 @@ func (m Monitor) formatCIA(c *cia.CIA, lastState [16]uint8) string {
 			cia.ICR_SET:  "Set/Clear Flag",
 		}))
 
-		cia1Details.WriteString("\nCRA:\n")
-		cia1Details.WriteString(formatBitfield(c.Registers[cia.CRA], map[uint8]string{
+		ciaDetails.WriteString("\nCRA:\n")
+		ciaDetails.WriteString(formatBitfield(c.Registers[cia.CRA], map[uint8]string{
 			cia.CRA_START:   "Start Timer A",
 			cia.CRA_PBON:    "Timer A Output on PB6",
 			cia.CRA_OUTMODE: "Timer A Output Mode",
@@ -645,8 +649,8 @@ func (m Monitor) formatCIA(c *cia.CIA, lastState [16]uint8) string {
 			cia.CRA_TODIN:   "TOD Frequency",
 		}))
 
-		cia1Details.WriteString("\nCRB:\n")
-		cia1Details.WriteString(formatBitfield(c.Registers[cia.CRB], map[uint8]string{
+		ciaDetails.WriteString("\nCRB:\n")
+		ciaDetails.WriteString(formatBitfield(c.Registers[cia.CRB], map[uint8]string{
 			cia.CRB_START:   "Start Timer B",
 			cia.CRB_PBON:    "Timer B Output on PB7",
 			cia.CRB_OUTMODE: "Timer B Output Mode",
@@ -656,7 +660,7 @@ func (m Monitor) formatCIA(c *cia.CIA, lastState [16]uint8) string {
 			cia.CRB_ALARM:   "TOD Alarm",
 		}))
 	}
-	return cia1Details.String()
+	return ciaDetails.String()
 }
 
 func (m Monitor) View() string {

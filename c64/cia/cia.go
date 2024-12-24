@@ -85,10 +85,10 @@ type CIA struct {
 	Registers [16]uint8
 	icrData   uint8 // interrupt control data (ICR)
 
-	timerALatch uint16
-	timerBLatch uint16
-	timerA      uint16
-	timerB      uint16
+	TimerALatch uint16
+	TimerBLatch uint16
+	TimerA      uint16
+	TimerB      uint16
 
 	cycles uint64
 
@@ -121,10 +121,10 @@ const (
 
 func NewCIA() *CIA {
 	cia := &CIA{
-		timerALatch: 0xFFFF,
-		timerA:      0xFFFF,
-		timerBLatch: 0xFFFF,
-		timerB:      0xFFFF,
+		TimerALatch: 0xFFFF,
+		TimerA:      0xFFFF,
+		TimerBLatch: 0xFFFF,
+		TimerB:      0xFFFF,
 	}
 
 	// Initialize timer latches and values to 0xFFFF
@@ -224,10 +224,10 @@ func (c *CIA) updateTimerA() {
 	}
 
 	// Decrement timer
-	c.timerA--
+	c.TimerA--
 
 	// Check for timer underflow
-	if c.timerA == 0 {
+	if c.TimerA == 0 {
 		// Set interrupt flag
 		if c.Registers[ICR]&ICR_TA != 0 {
 			//fmt.Println("timer a underflow interrupt")
@@ -252,7 +252,7 @@ func (c *CIA) updateTimerA() {
 		}
 
 		// Reload timer from latch
-		c.timerA = c.timerALatch
+		c.TimerA = c.TimerALatch
 	} else if c.Registers[CRA]&CRA_PBON != 0 &&
 		c.Registers[CRA]&CRA_OUTMODE == 0 {
 		// In pulse mode, clear PB6 after one cycle
@@ -262,7 +262,7 @@ func (c *CIA) updateTimerA() {
 	// Handle forced load
 	if c.Registers[CRA]&CRA_FORCE != 0 {
 		//fmt.Println("timer a force load")
-		c.timerA = c.timerALatch
+		c.TimerA = c.TimerALatch
 		c.Registers[CRA] &= ^CRA_FORCE // Clear force load bit
 	}
 }
@@ -294,10 +294,10 @@ func (c *CIA) updateTimerB() {
 	}
 
 	// Decrement timer
-	c.timerB--
+	c.TimerB--
 
 	// Check for timer underflow
-	if c.timerB == 0 {
+	if c.TimerB == 0 {
 		// Set interrupt flag
 		if c.Registers[ICR]&ICR_TB != 0 {
 			c.icrData |= ICR_TB
@@ -321,7 +321,7 @@ func (c *CIA) updateTimerB() {
 		}
 
 		// Reload timer from latch
-		c.timerB = c.timerBLatch
+		c.TimerB = c.TimerBLatch
 	} else if c.Registers[CRB]&CRB_PBON != 0 &&
 		c.Registers[CRB]&CRB_OUTMODE == 0 {
 		// In pulse mode, clear PB7 after one cycle
@@ -330,7 +330,7 @@ func (c *CIA) updateTimerB() {
 
 	// Handle forced load
 	if c.Registers[CRB]&CRB_FORCE != 0 {
-		c.timerB = c.timerBLatch
+		c.TimerB = c.TimerBLatch
 		c.Registers[CRB] &= ^CRB_FORCE // Clear force load bit
 	}
 }
@@ -417,19 +417,19 @@ func (c *CIA) WriteRegister(reg uint8, val uint8) {
 	case DDRB:
 		c.Registers[DDRB] = val
 	case TA_LO:
-		c.timerALatch = (c.timerALatch & 0xFF00) | uint16(val)
+		c.TimerALatch = (c.TimerALatch & 0xFF00) | uint16(val)
 		slog.Info(fmt.Sprintf("TA_LO %x\n", val))
-		slog.Info(fmt.Sprintf("latch %x\n", c.timerALatch))
+		slog.Info(fmt.Sprintf("latch %x\n", c.TimerALatch))
 	case TA_HI:
-		c.timerALatch = (c.timerALatch & 0x00FF) | (uint16(val) << 8)
-		c.timerA = c.timerALatch
+		c.TimerALatch = (c.TimerALatch & 0x00FF) | (uint16(val) << 8)
+		c.TimerA = c.TimerALatch
 		slog.Info(fmt.Sprintf("TA_HI %x\n", val))
-		slog.Info(fmt.Sprintf("latch %x\n", c.timerALatch))
+		slog.Info(fmt.Sprintf("latch %x\n", c.TimerALatch))
 	case TB_LO:
-		c.timerBLatch = (c.timerBLatch & 0xFF00) | uint16(val)
+		c.TimerBLatch = (c.TimerBLatch & 0xFF00) | uint16(val)
 	case TB_HI:
-		c.timerBLatch = (c.timerBLatch & 0x00FF) | (uint16(val) << 8)
-		c.timerB = c.timerBLatch
+		c.TimerBLatch = (c.TimerBLatch & 0x00FF) | (uint16(val) << 8)
+		c.TimerB = c.TimerBLatch
 	case TOD_10THS:
 		if c.Registers[CRB]&CRB_ALARM != 0 {
 			c.todAlarm[0] = val & 0x0F // Only lower 4 bits valid
@@ -488,15 +488,15 @@ func (c *CIA) writeCRA(val uint8) {
 
 	// Handle timer force load
 	if val&CRA_FORCE != 0 {
-		c.timerA = c.timerALatch
+		c.TimerA = c.TimerALatch
 		c.Registers[CRA] &= ^CRA_FORCE // Clear force load bit
 	}
 
 	// Handle timer start/stop
 	if oldStart == 0 && (val&CRA_START != 0) {
 		// Timer is being started - load initial value if it's 0
-		if c.timerA == 0 {
-			c.timerA = c.timerALatch
+		if c.TimerA == 0 {
+			c.TimerA = c.TimerALatch
 		}
 	}
 
@@ -516,15 +516,15 @@ func (c *CIA) writeCRB(val uint8) {
 
 	// Handle timer force load
 	if val&CRB_FORCE != 0 {
-		c.timerB = c.timerBLatch
+		c.TimerB = c.TimerBLatch
 		c.Registers[CRB] &= ^CRB_FORCE // Clear force load bit
 	}
 
 	// Handle timer start/stop
 	if oldStart == 0 && (val&CRB_START != 0) {
 		// Timer is being started - load initial value if it's 0
-		if c.timerB == 0 {
-			c.timerB = c.timerBLatch
+		if c.TimerB == 0 {
+			c.TimerB = c.TimerBLatch
 		}
 	}
 
@@ -549,13 +549,13 @@ func (c *CIA) ReadRegister(reg uint8) uint8 {
 	case DDRB:
 		return c.Registers[DDRB]
 	case TA_LO:
-		return uint8(c.timerA & 0xFF)
+		return uint8(c.TimerA & 0xFF)
 	case TA_HI:
-		return uint8(c.timerA >> 8)
+		return uint8(c.TimerA >> 8)
 	case TB_LO:
-		return uint8(c.timerB & 0xFF)
+		return uint8(c.TimerB & 0xFF)
 	case TB_HI:
-		return uint8(c.timerB >> 8)
+		return uint8(c.TimerB >> 8)
 	case TOD_10THS:
 		return c.Registers[TOD_10THS]
 	case TOD_SEC:

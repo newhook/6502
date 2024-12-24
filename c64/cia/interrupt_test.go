@@ -1,8 +1,9 @@
 package cia
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestInterrupts(t *testing.T) {
@@ -17,19 +18,19 @@ func TestInterrupts(t *testing.T) {
 		cia.WriteRegister(TA_HI, 0x00)
 
 		// Verify timer is loaded with correct value
-		assert.Equal(t, uint16(0x0002), cia.timerA)
+		assert.Equal(t, uint16(0x0002), cia.TimerA)
 
 		// Start Timer A in one-shot mode
 		cia.WriteRegister(CRA, CRA_START|CRA_RUNMODE)
 
 		// First cycle - should decrement to 1
 		cia.Update(1)
-		assert.Equal(t, uint16(0x0001), cia.timerA)
+		assert.Equal(t, uint16(0x0001), cia.TimerA)
 		assert.Equal(t, uint8(0), cia.icrData&ICR_TA)
 
 		// Second cycle - should decrement to 0 and trigger interrupt
 		cia.Update(1)
-		assert.Equal(t, uint16(0x0002), cia.timerA)
+		assert.Equal(t, uint16(0x0002), cia.TimerA)
 		assert.Equal(t, ICR_TA, cia.icrData&ICR_TA)
 
 		// Verify timer stopped (one-shot mode)
