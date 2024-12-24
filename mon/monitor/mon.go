@@ -34,6 +34,14 @@ func doStep() tea.Cmd {
 	})
 }
 
+type continueTick struct{}
+
+func doContinue() tea.Cmd {
+	return tea.Tick(1*time.Millisecond, func(t time.Time) tea.Msg {
+		return continueTick{}
+	})
+}
+
 // Monitor represents the UI state
 type Monitor struct {
 	stepper          Stepper
@@ -228,9 +236,8 @@ func (m *Monitor) relocate() {
 	m.selectedLocation = index
 }
 
-func (m Monitor) Write(p []byte) (n int, err error) {
-	line := string(p)
-
+func (m *Monitor) Write(p []byte) (n int, err error) {
+	line := strings.TrimSpace(string(p))
 	// Append the new line to the buffer
 	m.logBuffer = append(m.logBuffer, line)
 
@@ -267,8 +274,37 @@ func (m Monitor) formatLogBuffer() string {
 }
 
 // Handle keyboard input
-func (m Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case continueTick:
+		if m.paused || m.breakpoints[m.cpu.PC] {
+			m.paused = true
+			return m, nil
+		}
+
+		// Store state before step
+		m.lastState = CPUState{
+			A:  m.cpu.A,
+			X:  m.cpu.X,
+			Y:  m.cpu.Y,
+			PC: m.cpu.PC,
+			SP: m.cpu.SP,
+			P:  m.cpu.P,
+		}
+		m.captureMemoryState()
+		m.captureCIAState() // Capture CIA state
+
+		// Execute step until we hit a breakpoint
+		for cycles := 0; cycles < 10_000; {
+			cycles += int(m.stepper.Step())
+			if m.breakpoints[m.cpu.PC] {
+				m.paused = true
+				break
+			}
+		}
+		m.relocate()
+		return m, doContinue()
+
 	case stepTick:
 		// Check if we hit a breakpoint
 		if m.paused || m.breakpoints[m.cpu.PC] {
@@ -331,38 +367,23 @@ func (m Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.gotoDis = true
 			m.gotoInput.Focus()
 			return m, textinput.Blink
-		case "c":
-			// Store state before step
-			m.lastState = CPUState{
-				A:  m.cpu.A,
-				X:  m.cpu.X,
-				Y:  m.cpu.Y,
-				PC: m.cpu.PC,
-				SP: m.cpu.SP,
-				P:  m.cpu.P,
-			}
-			m.captureMemoryState()
-			m.captureCIAState() // Capture CIA state
 
-			// Execute step until we hit a breakpoint
-			for {
-				m.stepper.Step()
-				if m.breakpoints[m.cpu.PC] {
-					m.paused = true
-					break
-				}
-			}
-			m.relocate()
+		case "c":
+			m.paused = false
+			return m, doContinue()
 
 		case "g":
 			m.showingGoto = true
 			m.gotoInput.Focus()
 			return m, textinput.Blink
+
 		case "r":
 			// Refresh the screen by clearing and re-rendering
 			return m, tea.Batch(tea.ClearScreen)
+
 		case "q", "ctrl+c":
 			return m, tea.Quit
+
 		case "s":
 			// Single step
 			if m.paused {
@@ -380,6 +401,7 @@ func (m Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.stepper.Step()
 				m.relocate()
 			}
+
 		case "b":
 			// Toggle breakpoint at selected address
 			addr := m.locations[m.selectedLocation].PC
@@ -417,6 +439,7 @@ func (m Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.captureMemoryState() // Capture state for new memory region
 				}
 			}
+
 		case "down":
 			if m.activePane == "disasm" {
 				m.selectedLocation++
@@ -445,6 +468,7 @@ func (m Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.captureMemoryState()
 			}
+
 		case "pgdown":
 			if m.activePane == "disasm" {
 				m.selectedLocation += 20
@@ -461,6 +485,7 @@ func (m Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.captureMemoryState()
 			}
 		}
+
 	case tea.MouseEvent:
 		if msg.Type == tea.MouseLeft {
 			// TODO: Add click handling for panel selection

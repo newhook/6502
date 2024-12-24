@@ -10,6 +10,8 @@ import (
 	"github.com/newhook/6502/mon/monitor"
 )
 
+var runMonitor = false
+
 func main() {
 	computer, err := c64.NewC64()
 	if err != nil {
@@ -46,12 +48,14 @@ func main() {
 		// Reset vector
 		computer.CPU.PC = uint16(mem.Read(0xFFFC)) | uint16(mem.Read(0xFFFD))<<8
 
-		m := monitor.NewMonitor(computer, computer.CPU, computer.Memory, computer.CIA1, computer.CIA2, computer.VIC)
-		logger := slog.New(slog.NewTextHandler(m, nil))
-		slog.SetDefault(logger)
-		p := tea.NewProgram(m)
-		if _, err := p.Run(); err != nil {
-			return err
+		if runMonitor {
+			m := monitor.NewMonitor(computer, computer.CPU, computer.Memory, computer.CIA1, computer.CIA2, computer.VIC)
+			logger := slog.New(slog.NewTextHandler(m, nil))
+			slog.SetDefault(logger)
+			p := tea.NewProgram(m)
+			if _, err := p.Run(); err != nil {
+				return err
+			}
 		}
 
 		// Main emulation loop

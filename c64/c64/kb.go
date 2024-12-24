@@ -144,7 +144,7 @@ func (k *Keyboard) ScanKeyboard() byte {
 	// Get the current row selection from Port A
 	// Inverted because 0 selects a row
 	portA := k.CIA.ReadRegister(cia.PRA)
-	slog.Info(fmt.Sprintf("port a %x\n", portA))
+	slog.Info(fmt.Sprintf("port a %x", portA))
 	rowSelect := ^k.CIA.ReadRegister(cia.PRA)
 	slog.Info(fmt.Sprintln("row select", rowSelect))
 

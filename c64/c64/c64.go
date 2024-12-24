@@ -149,7 +149,7 @@ func (t *Timing) Step() {
 		actualHz := float64(t.cyclesSinceLastPrint) / elapsed.Seconds()
 		targetHz := float64(t.clockFrequency)
 
-		slog.Info(fmt.Sprintf("CPU Speed: %.2f MHz (Target: %.2f MHz) - %.1f%% of target speed\n",
+		slog.Info(fmt.Sprintf("CPU Speed: %.2f MHz (Target: %.2f MHz) - %.1f%% of target speed",
 			actualHz/1000000,
 			targetHz/1000000,
 			(actualHz/targetHz)*100))
@@ -249,6 +249,7 @@ func NewC64() (*C64, error) {
 		keyboard: kb,
 	}
 	kb.CIA = c64.CIA1
+	c64.CIA1.KB = kb
 
 	c64.Memory.VIC = c64.VIC
 	c64.Memory.CIA1 = c64.CIA1

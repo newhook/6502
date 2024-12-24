@@ -2,7 +2,6 @@ package cpu
 
 import (
 	"fmt"
-	"log/slog"
 )
 
 // The naming convention uses the instruction name followed by the addressing mode:
@@ -1138,7 +1137,7 @@ func (c *CPU) execute(opcode uint8) uint8 {
 	case RTI:
 		c.P = c.pull() & ^FlagB // Pull status, clear B flag
 		c.PC = c.pull16()       // Pull return address
-		slog.Info(fmt.Sprintf("rti %x\n", c.PC))
+		//slog.Info(fmt.Sprintf("rti %x", c.PC))
 		return 6
 
 	default:
@@ -1524,7 +1523,7 @@ func (c *CPU) HandleIRQ() {
 
 	// Load IRQ vector from $FFFE-$FFFF
 	c.PC = uint16(c.Read(0xFFFE)) | uint16(c.Read(0xFFFF))<<8
-	slog.Info(fmt.Sprintf("irq %x\n", c.PC))
+	//slog.Info(fmt.Sprintf("irq %x", c.PC))
 
 	// IRQ takes 7 cycles
 	//c.Cycles += 7
