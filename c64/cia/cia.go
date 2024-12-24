@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 )
 
 // Register offsets from CIA base address
@@ -130,66 +129,6 @@ func NewCIA() *CIA {
 		//	timerB:      0xFFFF,
 		//},
 	}
-}
-
-func (c *Registers) DumpState() string {
-	var out strings.Builder
-
-	// Format helper for control registers
-	formatCR := func(cr uint8) string {
-		return fmt.Sprintf("0x%02X (%08b)", cr, cr)
-	}
-
-	fmt.Fprintf(&out, "CIA State Dump:\n")
-	fmt.Fprintf(&out, "==============\n\n")
-
-	// Port registers
-	fmt.Fprintf(&out, "Ports:\n")
-	fmt.Fprintf(&out, "  Port A: 0x%02X  DDR A: 0x%02X\n", c.portA, c.ddrA)
-	fmt.Fprintf(&out, "  Port B: 0x%02X  DDR B: 0x%02X\n\n", c.portB, c.ddrB)
-
-	// Timer values and latches
-	fmt.Fprintf(&out, "Timers:\n")
-	fmt.Fprintf(&out, "  Timer A:  Current: 0x%04X  Latch: 0x%04X\n", c.timerA, c.timerALatch)
-	fmt.Fprintf(&out, "  Timer B:  Current: 0x%04X  Latch: 0x%04X\n\n", c.timerB, c.timerBLatch)
-
-	// Control registers detailed breakdown
-	fmt.Fprintf(&out, "Control Register A: %s\n", formatCR(c.cra))
-	fmt.Fprintf(&out, "  Start: %v\n", (c.cra&CRA_START) != 0)
-	fmt.Fprintf(&out, "  PB6 Output: %v\n", (c.cra&CRA_PBON) != 0)
-	fmt.Fprintf(&out, "  Output Mode: %v\n", (c.cra&CRA_OUTMODE) != 0)
-	fmt.Fprintf(&out, "  Run Mode: %s\n", map[bool]string{true: "One-shot", false: "Continuous"}[(c.cra&CRA_RUNMODE) != 0])
-	fmt.Fprintf(&out, "  Force Load: %v\n", (c.cra&CRA_FORCE) != 0)
-	fmt.Fprintf(&out, "  Input Mode: %s\n", map[bool]string{true: "CNT", false: "Clock"}[(c.cra&CRA_INMODE) != 0])
-	fmt.Fprintf(&out, "  SP Mode: %s\n", map[bool]string{true: "Output", false: "Input"}[(c.cra&CRA_SPMODE) != 0])
-	fmt.Fprintf(&out, "  TOD Freq: %s\n\n", map[bool]string{true: "50Hz", false: "60Hz"}[(c.cra&CRA_TODIN) != 0])
-
-	fmt.Fprintf(&out, "Control Register B: %s\n", formatCR(c.crb))
-	fmt.Fprintf(&out, "  Start: %v\n", (c.crb&CRB_START) != 0)
-	fmt.Fprintf(&out, "  PB7 Output: %v\n", (c.crb&CRB_PBON) != 0)
-	fmt.Fprintf(&out, "  Output Mode: %v\n", (c.crb&CRB_OUTMODE) != 0)
-	fmt.Fprintf(&out, "  Run Mode: %s\n", map[bool]string{true: "One-shot", false: "Continuous"}[(c.crb&CRB_RUNMODE) != 0])
-	fmt.Fprintf(&out, "  Force Load: %v\n", (c.crb&CRB_FORCE) != 0)
-	fmt.Fprintf(&out, "  Input Mode: %02b\n", (c.crb&CRB_INMODE)>>5)
-	fmt.Fprintf(&out, "  Alarm: %v\n\n", (c.crb&CRB_ALARM) != 0)
-
-	// Interrupt control registers
-	fmt.Fprintf(&out, "Interrupt Control:\n")
-	fmt.Fprintf(&out, "  Mask: 0x%02X (%08b)\n", c.icrMask, c.icrMask)
-	fmt.Fprintf(&out, "  Data: 0x%02X (%08b)\n", c.icrData, c.icrData)
-	fmt.Fprintf(&out, "  Enabled interrupts:\n")
-	fmt.Fprintf(&out, "    Timer A: %v\n", (c.icrMask&ICR_TA) != 0)
-	fmt.Fprintf(&out, "    Timer B: %v\n", (c.icrMask&ICR_TB) != 0)
-	fmt.Fprintf(&out, "    TOD: %v\n", (c.icrMask&ICR_TOD) != 0)
-	fmt.Fprintf(&out, "    Serial: %v\n", (c.icrMask&ICR_SDR) != 0)
-	fmt.Fprintf(&out, "    Flag: %v\n\n", (c.icrMask&ICR_FLAG) != 0)
-
-	// TOD clock
-	fmt.Fprintf(&out, "Time of Day Clock:\n")
-	fmt.Fprintf(&out, "  Hr:Min:Sec.Tenths = %02X:%02X:%02X.%01X\n",
-		c.todHr, c.todMin, c.todSec, c.todTenths)
-
-	return out.String()
 }
 
 // Call this whenever the CNT pin state changes
