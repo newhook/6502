@@ -1,7 +1,6 @@
 package cia
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 )
@@ -408,10 +407,10 @@ func (c *CIA) updateTOD() {
 func (c *CIA) WriteRegister(reg uint8, val uint8) {
 	switch reg {
 	case PRA:
-		slog.Log(context.Background(), slog.LevelInfo, "write port a %x\n", val)
+		slog.Info(fmt.Sprintf("write port a %x\n", val))
 		c.registers[PRA] = val
 	case PRB:
-		//slog.Log(context.Background(), slog.LevelInfo,"write port b %x\n", val)
+		//slog.Info("write port b %x\n", val)
 		c.registers[PRB] = val
 	case DDRA:
 		c.registers[DDRA] = val
@@ -419,13 +418,13 @@ func (c *CIA) WriteRegister(reg uint8, val uint8) {
 		c.registers[DDRB] = val
 	case TA_LO:
 		c.timerALatch = (c.timerALatch & 0xFF00) | uint16(val)
-		slog.Log(context.Background(), slog.LevelInfo, "TA_LO %x\n", val)
-		slog.Log(context.Background(), slog.LevelInfo, "latch %x\n", c.timerALatch)
+		slog.Info(fmt.Sprintf("TA_LO %x\n", val))
+		slog.Info(fmt.Sprintf("latch %x\n", c.timerALatch))
 	case TA_HI:
 		c.timerALatch = (c.timerALatch & 0x00FF) | (uint16(val) << 8)
 		c.timerA = c.timerALatch
-		slog.Log(context.Background(), slog.LevelInfo, "TA_HI %x\n", val)
-		slog.Log(context.Background(), slog.LevelInfo, "latch %x\n", c.timerALatch)
+		slog.Info(fmt.Sprintf("TA_HI %x\n", val))
+		slog.Info(fmt.Sprintf("latch %x\n", c.timerALatch))
 	case TB_LO:
 		c.timerBLatch = (c.timerBLatch & 0xFF00) | uint16(val)
 	case TB_HI:
@@ -472,7 +471,7 @@ func (c *CIA) WriteRegister(reg uint8, val uint8) {
 }
 
 func (c *CIA) writeICR(val uint8) {
-	slog.Log(context.Background(), slog.LevelInfo, "write icr %x\n", val)
+	slog.Info(fmt.Sprintf("write icr %x\n", val))
 	if val&ICR_SET != 0 {
 		// Set interrupt mask bits
 		c.registers[ICR] |= val & 0x1F
@@ -483,7 +482,7 @@ func (c *CIA) writeICR(val uint8) {
 }
 
 func (c *CIA) writeCRA(val uint8) {
-	slog.Log(context.Background(), slog.LevelInfo, "write cra %x\n", val)
+	slog.Info(fmt.Sprintf("write cra %x\n", val))
 	oldStart := c.registers[CRA] & CRA_START
 	c.registers[CRA] = val
 
@@ -584,7 +583,7 @@ func (c *CIA) readPortA() uint8 {
 
 	// First get the current state of external input lines
 	inputValues := c.getPortAInput() // This would be different for CIA1 vs CIA2
-	slog.Log(context.Background(), slog.LevelInfo, "read port a %x\n", inputValues)
+	slog.Info(fmt.Sprintf("read port a %x\n", inputValues))
 
 	// For output bits, use port register value, for input bits use external value
 	return (c.registers[PRA] & c.registers[DDRA]) | (inputValues & ^c.registers[DDRA])
@@ -681,7 +680,7 @@ func (c *CIA) getPortBInput() uint8 {
 	if c.KB != nil {
 		// Get keyboard state based on currently selected rows
 		v := c.KB.GetState(c.registers[PRA])
-		slog.Log(context.Background(), slog.LevelInfo, "getPortBInput %x\n", v)
+		slog.Info(fmt.Sprintf("getPortBInput %x\n", v))
 		return v
 		// XXX: joystick.
 	}

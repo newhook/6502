@@ -121,10 +121,10 @@ func (k *Keyboard) HandleSDLEvent(event sdl.Event) {
 	case *sdl.KeyboardEvent:
 		if mapping, exists := SDLKeyMapping[e.Keysym.Scancode]; exists {
 			if e.Type == sdl.KEYDOWN {
-				slog.Info("keydown", mapping.Symbol, mapping.Row, mapping.Col)
+				slog.Info(fmt.Sprintf("keydown %s %x %x", mapping.Symbol, mapping.Row, mapping.Col))
 				k.Matrix.KeyPress(mapping.Row, mapping.Col)
 			} else if e.Type == sdl.KEYUP {
-				slog.Info("keyup", mapping.Symbol, mapping.Row, mapping.Col)
+				slog.Info(fmt.Sprintf("keyup %s %x %x", mapping.Symbol, mapping.Row, mapping.Col))
 				k.Matrix.KeyRelease(mapping.Row, mapping.Col)
 			}
 
@@ -144,9 +144,9 @@ func (k *Keyboard) ScanKeyboard() byte {
 	// Get the current row selection from Port A
 	// Inverted because 0 selects a row
 	portA := k.CIA.ReadRegister(cia.PRA)
-	fmt.Printf("port a %x\n", portA)
+	slog.Info(fmt.Sprintf("port a %x\n", portA))
 	rowSelect := ^k.CIA.ReadRegister(cia.PRA)
-	fmt.Println("row select", rowSelect)
+	slog.Info(fmt.Sprintln("row select", rowSelect))
 
 	var result byte = 0xFF
 
@@ -163,7 +163,7 @@ func (k *Keyboard) ScanKeyboard() byte {
 		}
 	}
 
-	fmt.Println("write portb", result)
+	slog.Info(fmt.Sprintln("write portb", result))
 
 	// Update CIA Port B with the result
 	k.CIA.WriteRegister(cia.PRB, result)

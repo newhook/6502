@@ -1,7 +1,6 @@
 package cpu
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 )
@@ -1139,7 +1138,7 @@ func (c *CPU) execute(opcode uint8) uint8 {
 	case RTI:
 		c.P = c.pull() & ^FlagB // Pull status, clear B flag
 		c.PC = c.pull16()       // Pull return address
-		slog.Log(context.Background(), slog.LevelInfo, "rti %x\n", c.PC)
+		slog.Info(fmt.Sprintf("rti %x\n", c.PC))
 		return 6
 
 	default:
@@ -1525,7 +1524,7 @@ func (c *CPU) HandleIRQ() {
 
 	// Load IRQ vector from $FFFE-$FFFF
 	c.PC = uint16(c.Read(0xFFFE)) | uint16(c.Read(0xFFFF))<<8
-	slog.Log(context.Background(), slog.LevelInfo, "irq %x\n", c.PC)
+	slog.Info(fmt.Sprintf("irq %x\n", c.PC))
 
 	// IRQ takes 7 cycles
 	//c.Cycles += 7

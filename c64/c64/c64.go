@@ -1,7 +1,6 @@
 package c64
 
 import (
-	"context"
 	"fmt"
 	"github.com/newhook/6502/c64/cia"
 	"github.com/newhook/6502/c64/memory"
@@ -150,10 +149,10 @@ func (t *Timing) Step() {
 		actualHz := float64(t.cyclesSinceLastPrint) / elapsed.Seconds()
 		targetHz := float64(t.clockFrequency)
 
-		slog.Log(context.Background(), slog.LevelInfo, "CPU Speed: %.2f MHz (Target: %.2f MHz) - %.1f%% of target speed\n",
+		slog.Info(fmt.Sprintf("CPU Speed: %.2f MHz (Target: %.2f MHz) - %.1f%% of target speed\n",
 			actualHz/1000000,
 			targetHz/1000000,
-			(actualHz/targetHz)*100)
+			(actualHz/targetHz)*100))
 
 		t.cyclesSinceLastPrint = 0
 		t.lastPrintTime = time.Now()
@@ -426,7 +425,7 @@ func (c *C64) handleCIA2Event(event *cia.CIAEvent) {
 		// CIA2 triggers NMI
 		// NMI is edge-triggered, so we need to detect high-to-low transition
 		if !c.nmiLine { // If line was high
-			slog.Log(context.Background(), slog.LevelInfo, "nmiEdge")
+			slog.Info(fmt.Sprintf("nmiEdge"))
 			c.nmiEdge = true // Mark that we detected an edge
 		}
 		c.nmiLine = true
