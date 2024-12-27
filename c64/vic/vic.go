@@ -127,12 +127,12 @@ const (
 
 // Screen Control 1 (0xD011) bit masks
 const (
-	ScreenControl1Raster8 = 0x80 // Bit 7: Bit 8 of raster compare register
-	ScreenControl1ECM     = 0x40 // Bit 6: Extended Color Mode
-	ScreenControl1BMM     = 0x20 // Bit 5: Bitmap Mode
-	ScreenControl1DEN     = 0x10 // Bit 4: Display Enable
-	ScreenControl1RSEL    = 0x08 // Bit 3: Row Select (24/25 rows)
-	ScreenControl1YSCROLL = 0x07 // Bits 2-0: Vertical Scroll
+	CTRL1_Raster8 = 0x80 // Bit 7: Bit 8 of raster compare register
+	CTRL1_ECM     = 0x40 // Bit 6: Extended Color Mode
+	CTRL1_BMM     = 0x20 // Bit 5: Bitmap Mode
+	CTRL1_DEN     = 0x10 // Bit 4: Display Enable
+	CTRL1_RSEL    = 0x08 // Bit 3: Row Select (24/25 rows)
+	CTRL1_YSCROLL = 0x07 // Bits 2-0: Vertical Scroll
 )
 
 // Control Register 2 ($D016) bits
@@ -271,8 +271,8 @@ func (v *VIC) updateBadLine() {
 	// 2. Lower 3 bits of raster line match lower 3 bits of scroll register
 	// 3. Display enable bit is set
 	if v.rasterCounter >= 0x30 && v.rasterCounter <= 0xf7 {
-		if uint8(v.rasterCounter&0x07) == (v.registers[RegScreenControl1] & ScreenControl1YSCROLL) {
-			if v.registers[RegScreenControl1]&ScreenControl1DEN != 0 {
+		if uint8(v.rasterCounter&0x07) == (v.registers[RegScreenControl1] & CTRL1_YSCROLL) {
+			if v.registers[RegScreenControl1]&CTRL1_DEN != 0 {
 				v.badLine = true
 				v.badLineEnable = true
 				return
@@ -435,14 +435,14 @@ func (v *VIC) WriteRegister(reg uint8, value uint8) {
 		case RegScreenControl1:
 			// Keep raster MSB in sync
 			v.rasterIRQ &= 0xff
-			v.rasterIRQ |= (uint16(value) & ScreenControl1Raster8) << 1
+			v.rasterIRQ |= (uint16(value) & CTRL1_Raster8) << 1
 			v.registers[reg] = value
 			v.updateDisplayMode()
 			v.updateVideoMatrix()
 
 		case RegRaster:
 			v.registers[reg] = value
-			v.rasterIRQ = uint16(value) | ((uint16(v.registers[RegScreenControl1] & ScreenControl1Raster8)) << 1)
+			v.rasterIRQ = uint16(value) | ((uint16(v.registers[RegScreenControl1] & CTRL1_Raster8)) << 1)
 
 		case RegInterrupt:
 			// Writing 1 to a bit clears the interrupt
@@ -499,9 +499,9 @@ func (v *VIC) updateDisplayMode() {
 	ctrl1 := v.registers[RegScreenControl1]
 	ctrl2 := v.registers[RegScreenControl2]
 
-	v.displayActive = (ctrl1 & ScreenControl1DEN) != 0
+	v.displayActive = (ctrl1 & CTRL1_DEN) != 0
 
-	if ctrl1&ScreenControl1BMM != 0 {
+	if ctrl1&CTRL1_BMM != 0 {
 		// Bitmap mode
 		if ctrl2&CTRL2_MCM != 0 {
 			v.displayMode = MODE_MULTICOLOR_BITMAP
@@ -572,7 +572,7 @@ func (v *VIC) updateVideoMatrix() {
 
 	// Character Generator/Bitmap Base
 	// Bits 1-2 select character generator base in text modes
-	if v.registers[RegScreenControl1]&ScreenControl1BMM != 0 { // Bitmap mode
+	if v.registers[RegScreenControl1]&CTRL1_BMM != 0 { // Bitmap mode
 		v.bitmapBase = bankBase
 		// bit  ----x---
 		if memControl&0x08 != 0 {
@@ -598,7 +598,7 @@ func (v *VIC) updateVideoMatrix() {
 // Helper function to output memory layout for debugging
 func (v *VIC) logMemoryLayout() {
 	mode := "text"
-	if v.registers[RegScreenControl1]&ScreenControl1BMM != 0 {
+	if v.registers[RegScreenControl1]&CTRL1_BMM != 0 {
 		mode = "bitmap"
 	}
 
@@ -620,7 +620,7 @@ func (v *VIC) getCurrentVideoAddress(charPos uint16) uint16 {
 
 // Helper method to get current character/bitmap data pointer
 func (v *VIC) getCurrentCharacterAddress(charCode uint8, rowInChar uint8) uint16 {
-	if v.registers[RegScreenControl1]&ScreenControl1BMM != 0 { // Bitmap mode
+	if v.registers[RegScreenControl1]&CTRL1_BMM != 0 { // Bitmap mode
 		// In bitmap mode, address is based on pixel position
 		return v.bitmapBase + uint16(charCode)*8 + uint16(rowInChar)
 	} else {

@@ -10,7 +10,7 @@ import (
 	"github.com/newhook/6502/mon/monitor"
 )
 
-var runMonitor = false
+var runMonitor = true
 
 func main() {
 	computer, err := c64.NewC64()
