@@ -17,7 +17,7 @@ type Location struct {
 
 func (l Location) instruction() string {
 	if l.Inst == nil {
-		return fmt.Sprintf("$%04X: db $%02X        ; Invalid opcode\n", l.Address, l.Value)
+		return fmt.Sprintf("$%04X: db $%02X ; Invalid opcode", l.Address, l.Value)
 	}
 	operand := l.Inst.Mode.FormatOperand(l.OperandBytes)
 	if operand == "" {
@@ -94,6 +94,35 @@ func DisassembleMemory(memory cpu.MemoryBus, startAddr int, length int) string {
 	}
 
 	return out.String()
+}
+
+// DisassembleMemory disassembles a range of memory starting at the given address
+type Region struct {
+	Instructions []Location
+	Bytes        []byte
+	StartAddr    int
+	EndAddr      int
+}
+
+func DisassembleRegion(memory cpu.MemoryBus, startAddr int, instructions int) Region {
+	var rows []Location
+	pc := startAddr
+	for pc < maxMemory && len(rows) < instructions {
+		loc := disassembleLocation(memory, pc)
+		rows = append(rows, loc)
+		pc += loc.Size()
+	}
+	mem := make([]byte, pc-startAddr)
+	for i := 0; i < len(mem); i++ {
+		mem[i] = memory.Read(uint16(i))
+	}
+
+	return Region{
+		Instructions: rows,
+		Bytes:        mem,
+		StartAddr:    startAddr,
+		EndAddr:      pc,
+	}
 }
 
 func disassembleLocation(memory cpu.MemoryBus, pc int) Location {

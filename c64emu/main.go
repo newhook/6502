@@ -56,6 +56,7 @@ func main() {
 			if _, err := p.Run(); err != nil {
 				return err
 			}
+			return nil
 		}
 
 		// Main emulation loop

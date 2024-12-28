@@ -1,6 +1,6 @@
 module github.com/newhook/6502
 
-go 1.23.3
+go 1.22.10
 
 require (
 	github.com/charmbracelet/bubbles v0.20.0

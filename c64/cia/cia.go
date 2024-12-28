@@ -1,9 +1,5 @@
 package cia
 
-import (
-	"fmt"
-)
-
 // Register offsets from CIA base address
 const (
 	PRA       = 0x00 // Peripheral Data Register A
@@ -686,7 +682,6 @@ func (c *CIA) readICR() uint8 {
 
 	// Clear interrupt output if no more pending interrupts
 	if (value & 0x80) == 0 {
-		fmt.Println("clear irq")
 		c.irq = false
 	}
 

@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"os"
@@ -55,7 +56,7 @@ type Monitor struct {
 	paused           bool
 	width            int
 	height           int
-	locations        []disassembler.Location
+	region           disassembler.Region
 	locationIndex    int
 	selectedLocation int
 
@@ -71,6 +72,7 @@ type Monitor struct {
 	gotoDis       bool
 
 	breakpoints map[uint16]bool // Track breakpoint addresses
+	nextTo      uint16
 
 	logBuffer       []string // Buffer to store logged lines
 	logBufferSize   int      // Maximum number of lines in the buffer
@@ -85,30 +87,19 @@ var (
 	special   = lipgloss.AdaptiveColor{Light: "#43BF6D", Dark: "#73F59F"}
 	changed   = lipgloss.AdaptiveColor{Light: "#FF6B6B", Dark: "#FF6B6B"}
 
+	leftColumnWidth   = 50 // Fixed width for CPU state and disassembly
+	middleColumnWidth = 50 // Fixed width for stack and memory
+	rightColumnWidth  = 50 // Fixed width for cia1, cia2, and vic-ii
+
 	titleStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFF00")).
 			Padding(0, 1)
 
-	infoStyle = lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(highlight).
-			Padding(1).
-			Width(30)
-
-	changedStyle = lipgloss.NewStyle().
-			Foreground(changed).
-			Bold(true)
-
-	stackStyle = lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(special).
-			Padding(1).
-			Width(30)
-
-	disasmStyle = lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(highlight).
-			Padding(1)
+	labelStyle = lipgloss.NewStyle().
+			PaddingTop(0).
+			PaddingBottom(0).
+			PaddingLeft(1).
+			PaddingRight(1)
 
 	currentLineStyle = lipgloss.NewStyle().
 				Background(highlight).
@@ -117,21 +108,81 @@ var (
 	selectedLineStyle = lipgloss.NewStyle().
 				Foreground(highlight)
 
-	// Add new style for memory panel
-	memoryStyle = lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(special).
-			Padding(1).
-			Width(50)
+	changedStyle = lipgloss.NewStyle().
+			Foreground(changed).
+			Bold(true)
 
 	breakpointStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FF0000")).
 			Bold(true)
+
+	cpuStyle = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(highlight).
+			Width(leftColumnWidth).
+			Height(4).
+			PaddingLeft(1).
+			PaddingRight(1)
+
+	disasmStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(highlight).
+			Width(leftColumnWidth).
+			PaddingLeft(1).
+			PaddingRight(1)
+
+	stackStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(special).
+			Height(6).
+			Width(middleColumnWidth).
+			PaddingLeft(1).
+			PaddingRight(1)
+
+	// Add new style for memory panel
+	memoryStyle = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(special).
+			Width(middleColumnWidth).
+			PaddingLeft(1).
+			PaddingRight(1)
+
+	cia1Style = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(special).
+			Width(rightColumnWidth).
+			PaddingLeft(1).
+			PaddingRight(1)
+
+	cia2Style = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(special).
+			Width(rightColumnWidth).
+			PaddingLeft(1).
+			PaddingRight(1)
+
+	vicStyle = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(special).
+			Padding(1).
+			Width(rightColumnWidth)
+
+	outputStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(special).
+			Height(5).
+			PaddingLeft(1).
+			PaddingRight(1)
 )
 
 type Stepper interface {
 	Step() uint8
 }
+
+const (
+	nInstructions    = 100
+	nInstructionRows = 20
+)
 
 // Initialize the monitor
 func NewMonitor(stepper Stepper, cpu *cpu.CPU, mem cpu.MemoryBus, cia1 *cia.CIA, cia2 *cia.CIA, vic *vic.VIC) *Monitor {
@@ -148,7 +199,7 @@ func NewMonitor(stepper Stepper, cpu *cpu.CPU, mem cpu.MemoryBus, cia1 *cia.CIA,
 		cia2:            cia2,
 		vic:             vic,
 		paused:          true,
-		locations:       disassembler.DisassembleInstructions(mem),
+		region:          disassembler.DisassembleRegion(mem, 0, nInstructions),
 		memoryAddress:   0,
 		activePane:      "disasm",
 		gotoInput:       ti,
@@ -158,8 +209,13 @@ func NewMonitor(stepper Stepper, cpu *cpu.CPU, mem cpu.MemoryBus, cia1 *cia.CIA,
 		logScrollIndex:  0,
 		visibleLogLines: 5, // Assume 5 lines fit in the output window; adjust as needed
 	}
-	m.relocate()
+	m.relocate(0)
 	return m
+}
+
+func (m *Monitor) captureState() {
+	m.captureMemoryState()
+	m.captureCIAState()
 }
 
 // Helper function to capture current memory view state
@@ -227,15 +283,34 @@ func (m Monitor) Init() tea.Cmd {
 	return tea.Batch(tea.EnterAltScreen, tea.ClearScreen)
 }
 
-func (m *Monitor) relocate() {
-	index := 0
-	for i, l := range m.locations {
-		if l.Address == m.cpu.PC {
+func (m *Monitor) relocate(pc uint16) {
+	// Check to see whether the current region of memory has changed.
+	region := disassembler.DisassembleRegion(m.mem, m.region.StartAddr, len(m.region.Instructions))
+	if !bytes.Equal(m.region.Bytes, region.Bytes) {
+		// The memory region has changed.
+		// Load instructions at the current pc.
+		m.region = disassembler.DisassembleRegion(m.mem, int(m.cpu.PC), nInstructions)
+		m.locationIndex = 0
+		m.selectedLocation = 0
+		return
+	}
+
+	// Find the current location of the PC.
+	index := -1
+	for i, l := range m.region.Instructions {
+		if l.Address == pc {
 			index = i
 		}
 	}
-	m.locationIndex = index
-	m.selectedLocation = index
+	if index == -1 {
+		// PC cannot be found.
+		m.region = disassembler.DisassembleRegion(m.mem, int(pc), nInstructions)
+		m.locationIndex = 0
+		m.selectedLocation = 0
+	} else {
+		m.locationIndex = index
+		m.selectedLocation = index
+	}
 }
 
 func (m *Monitor) Write(p []byte) (n int, err error) {
@@ -279,7 +354,8 @@ func (m Monitor) formatLogBuffer() string {
 func (m *Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case continueTick:
-		if m.paused || m.breakpoints[m.cpu.PC] {
+		if m.paused || m.cpu.PC == m.nextTo || m.breakpoints[m.cpu.PC] {
+			m.nextTo = 0
 			m.paused = true
 			return m, nil
 		}
@@ -293,18 +369,18 @@ func (m *Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			SP: m.cpu.SP,
 			P:  m.cpu.P,
 		}
-		m.captureMemoryState()
-		m.captureCIAState() // Capture CIA state
+		m.captureState()
 
 		// Execute step until we hit a breakpoint
 		for cycles := 0; cycles < 10_000; {
 			cycles += int(m.stepper.Step())
-			if m.breakpoints[m.cpu.PC] {
+			if m.nextTo == m.cpu.PC || m.breakpoints[m.cpu.PC] {
+				m.nextTo = 0
 				m.paused = true
 				break
 			}
 		}
-		m.relocate()
+		m.relocate(m.cpu.PC)
 		return m, doContinue()
 
 	case stepTick:
@@ -323,12 +399,11 @@ func (m *Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			SP: m.cpu.SP,
 			P:  m.cpu.P,
 		}
-		m.captureMemoryState()
-		m.captureCIAState() // Capture CIA state
+		m.captureState()
 
 		// Execute step
 		m.stepper.Step()
-		m.relocate()
+		m.relocate(m.cpu.PC)
 
 		// Continue stepping
 		return m, doStep()
@@ -343,11 +418,7 @@ func (m *Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case tea.KeyEnter:
 				if addr, err := strconv.ParseUint(m.gotoInput.Value(), 16, 16); err == nil {
 					if m.gotoDis {
-						for i, l := range m.locations {
-							if l.Address == uint16(addr) {
-								m.selectedLocation = i
-							}
-						}
+						m.relocate(uint16(addr))
 					} else {
 						m.memoryAddress = uint16(addr)
 					}
@@ -374,7 +445,6 @@ func (m *Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			for i, b := range programData {
 				m.mem.Write(loadAddr+uint16(i), b)
 			}
-			m.locations = disassembler.DisassembleInstructions(m.mem)
 			m.Write([]byte(fmt.Sprintf("loaded at %d bytes at address %x", len(programData), loadAddr)))
 
 		case "G":
@@ -411,15 +481,14 @@ func (m *Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					SP: m.cpu.SP,
 					P:  m.cpu.P,
 				}
-				m.captureMemoryState()
-				m.captureCIAState() // Capture CIA state
+				m.captureState()
 				m.stepper.Step()
-				m.relocate()
+				m.relocate(m.cpu.PC)
 			}
 
 		case "b":
 			// Toggle breakpoint at selected address
-			addr := m.locations[m.selectedLocation].Address
+			addr := m.region.Instructions[m.selectedLocation].Address
 			if m.breakpoints[addr] {
 				delete(m.breakpoints, addr)
 			} else {
@@ -427,10 +496,9 @@ func (m *Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "n":
-			if m.paused && len(m.breakpoints) > 0 {
-				m.paused = false
-				return m, doStep()
-			}
+			m.nextTo = m.region.Instructions[m.selectedLocation+1].Address
+			m.paused = false
+			return m, doContinue()
 
 		case "p":
 			m.paused = !m.paused
@@ -457,9 +525,8 @@ func (m *Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "down":
 			if m.activePane == "disasm" {
-				m.selectedLocation++
-				if m.selectedLocation > len(m.locations)-20 {
-					m.selectedLocation = len(m.locations) - 20
+				if m.selectedLocation < len(m.region.Instructions)-1 {
+					m.selectedLocation++
 				}
 			} else {
 				if m.memoryAddress <= 0xFFF8 {
@@ -470,7 +537,7 @@ func (m *Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "pgup":
 			if m.activePane == "disasm" {
-				m.selectedLocation -= 20
+				m.selectedLocation -= nInstructionRows
 				if m.selectedLocation < 0 {
 					m.selectedLocation = 0
 				}
@@ -486,9 +553,9 @@ func (m *Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "pgdown":
 			if m.activePane == "disasm" {
-				m.selectedLocation += 20
-				if m.selectedLocation > len(m.locations)-20 {
-					m.selectedLocation = len(m.locations) - 20
+				m.selectedLocation += nInstructionRows
+				if m.selectedLocation > len(m.region.Instructions) {
+					m.selectedLocation = len(m.region.Instructions) - 1
 				}
 			} else if m.activePane == "memory" {
 				// Move memory view down by 64 bytes (8 rows)
@@ -559,16 +626,33 @@ func (m Monitor) formatFlags() string {
 	return result.String()
 }
 
+func (m Monitor) formatCPU() string {
+	return fmt.Sprintf(
+		"%s    %s    %s\n%s  %s\n\nFlags: %s",
+		m.formatReg8("A", m.cpu.A, m.lastState.A),
+		m.formatReg8("X", m.cpu.X, m.lastState.X),
+		m.formatReg8("Y", m.cpu.Y, m.lastState.Y),
+		m.formatReg16("PC", m.cpu.PC, m.lastState.PC),
+		m.formatReg8("SP", m.cpu.SP, m.lastState.SP),
+		m.formatFlags(),
+	)
+}
+
 // Disassemble memory around PC
 func (m Monitor) disassemble() string {
 	var result strings.Builder
 
-	for i := 0; i < 20; i++ {
-		offset := m.selectedLocation + i
-		if offset >= len(m.locations)-1 {
+	top := m.selectedLocation - nInstructionRows
+	if top < 0 {
+		top = 0
+	}
+
+	for i := 0; i < nInstructionRows; i++ {
+		offset := i + top
+		if offset >= len(m.region.Instructions)-1 {
 			break
 		}
-		l := m.locations[offset]
+		l := m.region.Instructions[offset]
 		line := l.String()
 		// Style the line based on whether it's the PC or selected line
 		if m.breakpoints[l.Address] {
@@ -590,7 +674,53 @@ func (m Monitor) disassemble() string {
 	return result.String()
 }
 
-// Show stack contents
+func (m Monitor) formatStack() string {
+	// Calculate how many stack values we have
+	stackSize := uint16(0xFF) - uint16(m.cpu.SP)
+	if stackSize > 18 {
+		stackSize = 18 // Limit to maximum 18 values
+	}
+
+	stackTop := uint16(m.cpu.SP) + stackSize
+
+	var values []string
+	for i := stackTop; i > uint16(m.cpu.SP); i-- {
+		values = append(values, fmt.Sprintf("$%02X: %02X", i, m.mem.Read(0x100+i)))
+	}
+
+	valuesPerCol := 6
+
+	var result strings.Builder
+	// Build rows
+	for row := 0; row < valuesPerCol; row++ {
+		// First column
+		if row < len(values) {
+			result.WriteString(values[row])
+		}
+
+		// Add padding
+		result.WriteString("    ")
+
+		// Second column
+		if row+valuesPerCol < len(values) {
+			result.WriteString(values[row+valuesPerCol])
+		}
+
+		// Add padding
+		result.WriteString("    ")
+
+		// Third column
+		if row+2*valuesPerCol < len(values) {
+			result.WriteString(values[row+2*valuesPerCol])
+		}
+
+		result.WriteString("\n")
+	}
+
+	return result.String()
+}
+
+/*
 func (m Monitor) formatStack() string {
 	var result strings.Builder
 	for i := uint16(0xFF); i >= uint16(m.cpu.SP); i-- {
@@ -598,6 +728,8 @@ func (m Monitor) formatStack() string {
 	}
 	return result.String()
 }
+
+*/
 
 func formatBitfield(value uint8, bitNames map[uint8]string) string {
 	var result strings.Builder
@@ -633,7 +765,6 @@ func (m Monitor) formatCIA(c *cia.CIA, lastState [16]uint8) string {
 	}
 
 	var ciaDetails strings.Builder
-	ciaDetails.WriteString("CIA\n\n")
 	for i := 0; i < len(c.Registers); i += 3 {
 		// Get the first register
 		name1, reg1 := registerNames[i], c.Registers[i]
@@ -707,78 +838,32 @@ func (m Monitor) formatCIA(c *cia.CIA, lastState [16]uint8) string {
 }
 
 func (m Monitor) View() string {
-	// Set column widths
-	leftColumnWidth := 40   // Fixed width for CPU state and disassembly
-	middleColumnWidth := 50 // Fixed width for stack and memory
-	rightColumnWidth := 50  // Fixed width for cia1, cia2, and vic-ii
-
-	// Update style widths
-	infoStyle = infoStyle.Width(leftColumnWidth)
-	disasmStyle = disasmStyle.Width(leftColumnWidth)
-	stackStyle = stackStyle.Width(middleColumnWidth)
-	memoryStyle = memoryStyle.Width(middleColumnWidth)
-
-	// Define styles for the new panels
-	ciaStyle := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(special).
-		Padding(1).
-		Width(rightColumnWidth)
-
-	vicStyle := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(special).
-		Padding(1).
-		Width(rightColumnWidth)
-
 	// Left column: CPU state and disassembly
-	cpuState := infoStyle.Render(fmt.Sprintf(
-		"CPU State\n\n%s    %s    %s\n%s  %s\n\nFlags: %s\n",
-		m.formatReg8("A", m.cpu.A, m.lastState.A),
-		m.formatReg8("X", m.cpu.X, m.lastState.X),
-		m.formatReg8("Y", m.cpu.Y, m.lastState.Y),
-		m.formatReg16("PC", m.cpu.PC, m.lastState.PC),
-		m.formatReg8("SP", m.cpu.SP, m.lastState.SP),
-		m.formatFlags(),
-	))
-
-	disasm := disasmStyle.Render(fmt.Sprintf(
-		"Disassembly\n\n%s",
-		m.disassemble(),
-	))
-
 	leftColumn := lipgloss.JoinVertical(
 		lipgloss.Left,
-		cpuState,
-		disasm,
+		labelStyle.Render("CPU"),
+		cpuStyle.Render(m.formatCPU()),
+		labelStyle.Render("Disassembly"),
+		disasmStyle.Render(m.disassemble()),
 	)
 
 	// Middle column: Stack and memory
-	stack := stackStyle.Render(fmt.Sprintf(
-		"Stack\n\n%s",
-		m.formatStack(),
-	))
-
-	memory := memoryStyle.Render(fmt.Sprintf(
-		"Memory (↑↓ to scroll)\n\n%s",
-		m.formatMemory(),
-	))
-
 	middleColumn := lipgloss.JoinVertical(
 		lipgloss.Left,
-		stack,
-		memory,
+		labelStyle.Render("Stack"),
+		stackStyle.Render(m.formatStack()),
+		labelStyle.Render("Memory (↑↓ to scroll)"),
+		memoryStyle.Render(m.formatMemory()),
 	)
-
-	cia1 := ciaStyle.Render(m.formatCIA(m.cia1, m.lastCIA1))
-	cia2 := ciaStyle.Render(m.formatCIA(m.cia2, m.lastCIA2))
-	vic := vicStyle.Render("VIC-II\n\n<vic-ii details here>")
 
 	rightColumn := lipgloss.JoinVertical(
 		lipgloss.Left,
-		cia1,
-		cia2,
-		vic,
+		labelStyle.Render("CIA1"),
+		cia1Style.Render(m.formatCIA(m.cia1, m.lastCIA1)),
+		labelStyle.Render("CIA2"),
+		cia2Style.Render(m.formatCIA(m.cia2, m.lastCIA2)),
+		labelStyle.Render("VIC-II"),
+		vicStyle.Render("VIC-II\n\n<vic-ii details here>"),
 	)
 
 	// Help section at the bottom
@@ -803,12 +888,7 @@ func (m Monitor) View() string {
 	)
 
 	// Output window at the bottom
-	outputWindow := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(special).
-		Padding(1).
-		Width(m.width).
-		Render(fmt.Sprintf("Output Window\n\n%s", m.formatLogBuffer()))
+	outputWindow := outputStyle.Width(m.width).Render(m.formatLogBuffer())
 
 	// Add goto dialog if active
 	if m.showingGoto {
@@ -824,6 +904,7 @@ func (m Monitor) View() string {
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
 			content,
+			labelStyle.Render("Output"),
 			outputWindow,
 			help,
 			dialog,
@@ -834,6 +915,7 @@ func (m Monitor) View() string {
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		content,
+		labelStyle.Render("Output"),
 		outputWindow,
 		help,
 	)
