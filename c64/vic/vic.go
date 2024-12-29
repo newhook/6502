@@ -459,13 +459,13 @@ func (v *VIC) WriteRegister(reg uint8, value uint8) {
 		case RegSpriteCollision, RegSpriteBgCollision:
 			return
 
-		default:
+		case RegMemPointers:
 			v.registers[reg] = value
-			if reg == RegMemPointers {
-				v.updateVideoMatrix()
-			} else if reg == RegScreenControl2 {
-				v.updateDisplayMode()
-			}
+			v.updateVideoMatrix()
+
+		case RegScreenControl2:
+			v.registers[reg] = value
+			v.updateDisplayMode()
 		}
 	}
 }

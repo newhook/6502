@@ -55,7 +55,7 @@ func TestSimpleInstructions(t *testing.T) {
 			}
 
 			assert.NoError(t, err)
-			assert.Equal(t, tt.expected, asm.output)
+			assert.Equal(t, tt.expected, asm.GetOutput())
 		})
 	}
 }
@@ -108,7 +108,7 @@ func TestBranchInstructions(t *testing.T) {
 			}
 
 			assert.NoError(t, err)
-			assert.Equal(t, tt.expected, asm.output)
+			assert.Equal(t, tt.expected, asm.GetOutput())
 		})
 	}
 }
@@ -165,7 +165,7 @@ func TestDirectives(t *testing.T) {
 			}
 
 			assert.NoError(t, err)
-			assert.Equal(t, tt.expected, asm.output)
+			assert.Equal(t, tt.expected, asm.GetOutput())
 		})
 	}
 }
@@ -212,7 +212,7 @@ func TestSymbols(t *testing.T) {
 			}
 
 			assert.NoError(t, err)
-			assert.Equal(t, tt.expected, asm.output)
+			assert.Equal(t, tt.expected, asm.GetOutput())
 		})
 	}
 }

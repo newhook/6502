@@ -54,6 +54,11 @@ func (p *Parser) detectAddressMode(line *Line) error {
 		return fmt.Errorf("unknown instruction: %s", line.Instruction)
 	}
 
+	if line.Instruction == "BRK" {
+		// BRK is special and has a padding byte.
+		line.AddressMode = Relative
+		return nil
+	}
 	if operand == "" {
 		// Check if this instruction can use accumulator mode with no operand
 		switch line.Instruction {
@@ -344,19 +349,7 @@ var directiveHandlers = map[string]DirectiveHandler{
 
 // handleOrg processes the .org directive
 func handleOrg(a *Assembler, operand string) error {
-	value := parseNumber(operand)
-	if a.currentPass == 1 {
-		a.pc = value
-	} else {
-		// On pass 2, pad output to reach org address if needed,
-		// but if the .org directive is the first instruction.
-		if len(a.output) > 0 {
-			for count := value - a.pc; count > 0; count-- {
-				a.output = append(a.output, 0)
-			}
-		}
-		a.pc = value
-	}
+	a.pc = parseNumber(nil, operand)
 	return nil
 }
 
@@ -364,8 +357,8 @@ func handleOrg(a *Assembler, operand string) error {
 func handleByte(a *Assembler, operand string) error {
 	values := parseByteList(operand)
 	if a.currentPass == 2 {
-		for _, v := range values {
-			a.output = append(a.output, v)
+		for i, v := range values {
+			a.emitOutput(a.pc+uint16(i), v)
 		}
 	}
 	a.pc += uint16(len(values))
@@ -374,11 +367,11 @@ func handleByte(a *Assembler, operand string) error {
 
 // handleWord processes the .word directive
 func handleWord(a *Assembler, operand string) error {
-	values := parseWordList(operand)
+	values := parseWordList(a.symbols, operand)
 	if a.currentPass == 2 {
-		for _, v := range values {
-			a.output = append(a.output, uint8(v&0xFF))
-			a.output = append(a.output, uint8(v>>8))
+		for i, v := range values {
+			a.emitOutput(a.pc+uint16(i*2), uint8(v&0xFF))
+			a.emitOutput(a.pc+uint16(i*2+1), uint8(v>>8))
 		}
 	}
 	a.pc += uint16(len(values) * 2)
@@ -399,7 +392,7 @@ func parseByteList(operand string) []uint8 {
 				values = append(values, uint8(ch))
 			}
 		} else {
-			value := parseNumber(part)
+			value := parseNumber(nil, part)
 			values = append(values, uint8(value))
 		}
 	}
@@ -407,20 +400,20 @@ func parseByteList(operand string) []uint8 {
 }
 
 // parseWordList splits a comma-separated list of values and parses each one
-func parseWordList(operand string) []uint16 {
+func parseWordList(symbols map[string]*Symbol, operand string) []uint16 {
 	parts := strings.Split(operand, ",")
 	values := make([]uint16, 0, len(parts))
 
 	for _, part := range parts {
 		part = strings.TrimSpace(part)
-		value := parseNumber(part)
-		values = append(values, uint16(value))
+		value := parseNumber(symbols, part)
+		values = append(values, value)
 	}
 	return values
 }
 
 // parseNumber handles different number formats (hex, binary, decimal)
-func parseNumber(s string) uint16 {
+func parseNumber(symbols map[string]*Symbol, s string) uint16 {
 	s = strings.TrimSpace(s)
 
 	// Handle hex ($)
@@ -440,10 +433,17 @@ func parseNumber(s string) uint16 {
 	}
 
 	// Handle decimal
-	val, err := strconv.ParseUint(s, 10, 16)
-	if err == nil {
-		return uint16(val)
+	if s[0] >= '0' && s[0] <= '9' {
+		val, err := strconv.ParseUint(s, 10, 16)
+		if err == nil {
+			return uint16(val)
+		}
 	}
 
+	if symbols != nil {
+		if sym, ok := symbols[s]; ok {
+			return sym.Value
+		}
+	}
 	return 0
 }

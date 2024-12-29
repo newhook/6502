@@ -402,7 +402,7 @@ func (c *CIA) updateTOD() {
 func (c *CIA) WriteRegister(reg uint8, val uint8) {
 	switch reg {
 	case PRA, PRB, SDR, DDRA, DDRB:
-		c.Registers[PRA] = val
+		c.Registers[reg] = val
 
 	case TA_LO:
 		c.TimerALatch = (c.TimerALatch & 0xFF00) | uint16(val)
