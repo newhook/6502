@@ -197,6 +197,18 @@ func NewVIC(mem *memory.Manager) *VIC {
 
 const NUM_REGISTERS = 0x2F
 
+// Sprite data structure to track sprite state
+type Sprite struct {
+	x          uint16 // X position (including MSB)
+	y          uint8  // Y position
+	enabled    bool   // Sprite enabled status
+	multicolor bool   // Multicolor mode
+	xExpand    bool   // X expansion
+	yExpand    bool   // Y expansion
+	priority   bool   // Sprite-to-background priority
+	dataPtr    uint8  // Pointer to sprite data
+}
+
 type VIC struct {
 	mem *memory.Manager
 
@@ -227,6 +239,10 @@ type VIC struct {
 	rasterIRQ              uint16 // the raster line at which an interrupt should occur.
 	irqStatus              uint8
 	spritePriorityRegister uint8
+
+	sprites                   [NUM_SPRITES]Sprite
+	spriteSpriteCollision     uint8
+	spriteBackgroundCollision uint8
 }
 
 // Update processes one VIC-II cycle
@@ -341,7 +357,173 @@ func (v *VIC) generateDisplayData() {
 			v.generateMulticolorBitmap(pixelIndex, charIndex, xPos, yPos)
 
 	*/
+	v.renderSprites()
 }
+
+// Add these methods to your VIC struct implementation
+
+// renderSprites renders all enabled sprites for the current raster line
+func (v *VIC) renderSprites() {
+	// Only render during visible area
+	if v.rasterCounter < FIRST_VISIBLE_LINE || v.rasterCounter >= LAST_VISIBLE_LINE {
+		return
+	}
+
+	// Process sprites in reverse order (sprite 7 first, as it has lowest priority)
+	for i := NUM_SPRITES - 1; i >= 0; i-- {
+		if v.sprites[i].enabled {
+			v.renderSprite(uint8(i))
+		}
+	}
+}
+
+// renderSprite renders a single sprite for the current raster line
+func (v *VIC) renderSprite(spriteNum uint8) {
+	sprite := &v.sprites[spriteNum]
+
+	// Check if sprite is visible on current raster line
+	spriteY := int16(sprite.y)
+	currentY := int16(v.rasterCounter - FIRST_VISIBLE_LINE)
+	spriteHeight := int16(21)
+	if sprite.yExpand {
+		spriteHeight *= 2
+	}
+
+	// Skip if sprite not visible on this line
+	if currentY < int16(spriteY) || currentY >= int16(spriteY)+spriteHeight {
+		return
+	}
+
+	// Calculate which row of the sprite we're rendering
+	spriteRow := currentY - int16(spriteY)
+	if sprite.yExpand {
+		spriteRow /= 2
+	}
+
+	// Get sprite data pointer
+	spriteDataPtr := uint16(sprite.dataPtr) * 64
+	rowOffset := uint16(spriteRow) * 3 // 3 bytes per row
+
+	// Read sprite data for current row (3 bytes = 24 bits)
+	data1 := v.mem.Read(spriteDataPtr + rowOffset)
+	data2 := v.mem.Read(spriteDataPtr + rowOffset + 1)
+	data3 := v.mem.Read(spriteDataPtr + rowOffset + 2)
+
+	// Calculate x position in screen space
+	screenX := int16(sprite.x) - 24 // Adjust for sprite border offset
+
+	// Get sprite colors
+	spriteColor := v.registers[RegSprite0Color+spriteNum]
+	multicolor0 := v.registers[RegSpriteMulti0]
+	multicolor1 := v.registers[RegSpriteMulti1]
+
+	// Render the sprite pixels
+	if sprite.multicolor {
+		v.renderMulticolorSprite(screenX, currentY, data1, data2, data3,
+			spriteColor, multicolor0, multicolor1, sprite.xExpand, sprite.priority)
+	} else {
+		v.renderStandardSprite(screenX, currentY, data1, data2, data3,
+			spriteColor, sprite.xExpand, sprite.priority)
+	}
+}
+
+// renderStandardSprite renders a standard (high-resolution) sprite
+func (v *VIC) renderStandardSprite(x int16, y int16, data1, data2, data3 uint8,
+	color uint8, xExpand bool, priority bool) {
+
+	// Convert the three data bytes into 24 bits
+	bits := uint32(data1)<<16 | uint32(data2)<<8 | uint32(data3)
+
+	// Calculate pixel index in display buffer
+	bufferOffset := int(y) * VISIBLE_WIDTH
+
+	// Render all 24 bits
+	for bit := uint8(0); bit < 24; bit++ {
+		if bits&(1<<(23-bit)) != 0 {
+			pixelX := x + int16(bit)
+			if xExpand {
+				// In x-expanded mode, each bit is rendered twice
+				pixelX *= 2
+				v.plotSpritePixel(bufferOffset, int(pixelX), color, priority)
+				v.plotSpritePixel(bufferOffset, int(pixelX+1), color, priority)
+			} else {
+				v.plotSpritePixel(bufferOffset, int(pixelX), color, priority)
+			}
+		}
+	}
+}
+
+// renderMulticolorSprite renders a multicolor sprite
+func (v *VIC) renderMulticolorSprite(x int16, y int16, data1, data2, data3 uint8,
+	spriteColor, multicolor0, multicolor1 uint8, xExpand bool, priority bool) {
+
+	// Convert the three data bytes into 24 bits
+	bits := uint32(data1)<<16 | uint32(data2)<<8 | uint32(data3)
+
+	// Calculate pixel index in display buffer
+	bufferOffset := int(y) * VISIBLE_WIDTH
+
+	// In multicolor mode, bits are processed in pairs
+	for bitPair := uint8(0); bitPair < 12; bitPair++ {
+		// Extract 2 bits
+		pixelBits := (bits >> (22 - (bitPair * 2))) & 0x3
+
+		// Determine color based on bit pair
+		var color uint8
+		switch pixelBits {
+		case 0:
+			continue // Transparent
+		case 1:
+			color = multicolor0
+		case 2:
+			color = spriteColor
+		case 3:
+			color = multicolor1
+		}
+
+		// Calculate x position (each pixel is twice as wide in multicolor mode)
+		pixelX := x + int16(bitPair*2)
+
+		if xExpand {
+			// In x-expanded mode, each multicolor pixel is 4 pixels wide
+			pixelX *= 2
+			for i := 0; i < 4; i++ {
+				v.plotSpritePixel(bufferOffset, int(pixelX)+i, color, priority)
+			}
+		} else {
+			// Normal multicolor pixel is 2 pixels wide
+			v.plotSpritePixel(bufferOffset, int(pixelX), color, priority)
+			v.plotSpritePixel(bufferOffset, int(pixelX+1), color, priority)
+		}
+	}
+}
+
+// plotSpritePixel plots a single sprite pixel to the display buffer
+func (v *VIC) plotSpritePixel(bufferOffset, x int, color uint8, priority bool) {
+	// Check if pixel is within visible screen area
+	if x < 0 || x >= VISIBLE_WIDTH {
+		return
+	}
+
+	pixelIndex := bufferOffset + x
+
+	// Check array bounds
+	if pixelIndex < 0 || pixelIndex >= len(v.displayBuffer) {
+		return
+	}
+
+	// Handle sprite-background priority
+	if priority {
+		// Sprite appears behind background
+		if v.displayBuffer[pixelIndex] == v.registers[RegBgColor0] {
+			v.displayBuffer[pixelIndex] = color
+		}
+	} else {
+		// Sprite appears in front of background
+		v.displayBuffer[pixelIndex] = color
+	}
+}
+
 func (v *VIC) getCurrentPixelIndex(rasterX uint16, rasterY uint16) int {
 	// Only calculate for visible area
 	if rasterY < 56 || rasterY > 255 {
@@ -401,9 +583,157 @@ func (v *VIC) generateMulticolorBitmap(pixelIndex uint16, charIndex uint16, xPos
 }
 
 func (v *VIC) updateSprites() {
-	// Check sprite-sprite and sprite-background collisions
-	// Handle sprite DMA
-	// Update sprite positions and data
+	// Process sprite DMA cycles
+	if v.rasterCycle >= 15 && v.rasterCycle <= 54 {
+		// Sprite data fetch happens during visible screen area
+		v.fetchSpriteData()
+	}
+
+	// Update sprite positions and check collisions
+	v.updateSpritePositions()
+	v.checkSpriteCollisions()
+}
+
+func (v *VIC) fetchSpriteData() {
+	// Each sprite needs 2 cycles for DMA
+	spriteIndex := (v.rasterCycle - 15) / SPRITE_DMA_CYCLES
+
+	if spriteIndex < NUM_SPRITES && v.sprites[spriteIndex].enabled {
+		// Get sprite data pointer from $07F8-$07FF
+		basePtr := SPRITE_POINTER_BASE + uint16(spriteIndex)
+		v.sprites[spriteIndex].dataPtr = v.mem.Read(basePtr)
+	}
+}
+
+func (v *VIC) updateSpritePositions() {
+	for i := uint8(0); i < NUM_SPRITES; i++ {
+		// Update X position (including MSB from $D010)
+		xLow := v.registers[RegSprite0X+(i*2)]
+		xMsb := (v.registers[RegSpriteXMSB] >> i) & 1
+		v.sprites[i].x = uint16(xLow) | (uint16(xMsb) << 8)
+
+		// Update Y position
+		v.sprites[i].y = v.registers[RegSprite0Y+(i*2)]
+
+		// Update sprite attributes
+		v.sprites[i].enabled = (v.registers[RegSpriteEnable]>>i)&1 == 1
+		v.sprites[i].multicolor = (v.registers[RegSpriteMulticolor]>>i)&1 == 1
+		v.sprites[i].xExpand = (v.registers[RegSpriteXExpand]>>i)&1 == 1
+		v.sprites[i].yExpand = (v.registers[RegSpriteYExpand]>>i)&1 == 1
+		v.sprites[i].priority = (v.registers[RegSpritePriority]>>i)&1 == 1
+	}
+}
+
+func (v *VIC) checkSpriteCollisions() {
+	// Reset collision registers if they were just read
+	if v.registers[RegSpriteCollision] == 0 {
+		v.spriteSpriteCollision = 0
+	}
+	if v.registers[RegSpriteBgCollision] == 0 {
+		v.spriteBackgroundCollision = 0
+	}
+
+	// Check sprite-sprite collisions
+	for i := uint8(0); i < NUM_SPRITES-1; i++ {
+		if !v.sprites[i].enabled {
+			continue
+		}
+
+		for j := i + 1; j < NUM_SPRITES; j++ {
+			if !v.sprites[j].enabled {
+				continue
+			}
+
+			if v.spriteOverlaps(i, j) {
+				// Set collision bits for both sprites
+				v.spriteSpriteCollision |= (1 << i) | (1 << j)
+				// Set interrupt if enabled
+				if v.registers[RegInterruptEnable]&InterruptSpriteSprite != 0 {
+					v.registers[RegInterrupt] |= InterruptSpriteSprite
+					v.irqLine = true
+				}
+			}
+		}
+	}
+
+	// Check sprite-background collisions
+	for i := uint8(0); i < NUM_SPRITES; i++ {
+		if !v.sprites[i].enabled {
+			continue
+		}
+
+		if v.spriteIntersectsBackground(i) {
+			v.spriteBackgroundCollision |= (1 << i)
+			// Set interrupt if enabled
+			if v.registers[RegInterruptEnable]&InterruptSpriteBg != 0 {
+				v.registers[RegInterrupt] |= InterruptSpriteBg
+				v.irqLine = true
+			}
+		}
+	}
+}
+
+func (v *VIC) spriteOverlaps(s1, s2 uint8) bool {
+	// Get sprite dimensions (account for expansion)
+	s1Width := SPRITE_WIDTH
+	if v.sprites[s1].xExpand {
+		s1Width *= 2
+	}
+	s1Height := uint8(21)
+	if v.sprites[s1].yExpand {
+		s1Height *= 2
+	}
+
+	s2Width := SPRITE_WIDTH
+	if v.sprites[s2].xExpand {
+		s2Width *= 2
+	}
+	s2Height := uint8(21)
+	if v.sprites[s2].yExpand {
+		s2Height *= 2
+	}
+
+	// Check for overlap
+	if v.sprites[s1].x >= v.sprites[s2].x+uint16(s2Width) ||
+		v.sprites[s2].x >= v.sprites[s1].x+uint16(s1Width) ||
+		v.sprites[s1].y >= v.sprites[s2].y+s2Height ||
+		v.sprites[s2].y >= v.sprites[s1].y+s1Height {
+		return false
+	}
+
+	return true
+}
+
+func (v *VIC) spriteIntersectsBackground(spriteNum uint8) bool {
+	// Only check if sprite is in visible area
+	if v.sprites[spriteNum].y < 30 ||
+		v.sprites[spriteNum].y > 249 ||
+		v.sprites[spriteNum].x < uint16(LEFT_BORDER_END) ||
+		v.sprites[spriteNum].x > uint16(RIGHT_BORDER_START) {
+		return false
+	}
+
+	// Get sprite data
+	spriteDataPtr := uint16(v.sprites[spriteNum].dataPtr) * 64
+
+	// Check each row of the sprite
+	height := uint8(21)
+	if v.sprites[spriteNum].yExpand {
+		height *= 2
+	}
+
+	for row := uint8(0); row < height; row++ {
+		data := v.mem.Read(spriteDataPtr + uint16(row))
+
+		// If any sprite pixel overlaps with non-background pixel
+		if data != 0 {
+			// This is a simplified check - in reality you'd need to check
+			// pixel by pixel against the actual background content
+			return true
+		}
+	}
+
+	return false
 }
 
 func (v *VIC) WriteRegister(reg uint8, value uint8) {
@@ -426,11 +756,62 @@ func (v *VIC) WriteRegister(reg uint8, value uint8) {
 			if v.registers[RegSpriteXMSB]&(1<<spriteNum) != 0 {
 				xpos |= 0x100
 			}
-			// Store in register
-			v.registers[reg] = uint8(xpos & 0xFF)
+			v.sprites[spriteNum].x = xpos
+
+		case RegSprite0Y, RegSprite1Y, RegSprite2Y, RegSprite3Y,
+			RegSprite4Y, RegSprite5Y, RegSprite6Y, RegSprite7Y:
+			v.registers[reg] = value
+			spriteNum := (reg - 1) >> 1
+			v.sprites[spriteNum].y = value
 
 		case RegSpriteXMSB:
 			v.registers[reg] = value
+			// Update all sprite X positions to account for MSB changes
+			for i := uint8(0); i < NUM_SPRITES; i++ {
+				xpos := uint16(v.registers[RegSprite0X+i*2])
+				if value&(1<<i) != 0 {
+					xpos |= 0x100
+				}
+				v.sprites[i].x = xpos
+			}
+
+		case RegSpriteEnable:
+			v.registers[reg] = value
+			for i := uint8(0); i < NUM_SPRITES; i++ {
+				v.sprites[i].enabled = (value & (1 << i)) != 0
+			}
+
+			// Sprite Y-expansion ($D017)
+		case RegSpriteYExpand:
+			v.registers[reg] = value
+			for i := uint8(0); i < NUM_SPRITES; i++ {
+				v.sprites[i].yExpand = (value & (1 << i)) != 0
+			}
+
+			// Sprite priority ($D01B)
+		case RegSpritePriority:
+			v.registers[reg] = value
+			for i := uint8(0); i < NUM_SPRITES; i++ {
+				v.sprites[i].priority = (value & (1 << i)) != 0
+			}
+
+			// Sprite multicolor ($D01C)
+		case RegSpriteMulticolor:
+			v.registers[reg] = value
+			for i := uint8(0); i < NUM_SPRITES; i++ {
+				v.sprites[i].multicolor = (value & (1 << i)) != 0
+			}
+
+		// Sprite X-expansion ($D01D)
+		case RegSpriteXExpand:
+			v.registers[reg] = value
+			for i := uint8(0); i < NUM_SPRITES; i++ {
+				v.sprites[i].xExpand = (value & (1 << i)) != 0
+			}
+
+		// Read-only collision registers
+		case RegSpriteCollision, RegSpriteBgCollision:
+			return
 
 		case RegScreenControl1:
 			// Keep raster MSB in sync
@@ -454,10 +835,6 @@ func (v *VIC) WriteRegister(reg uint8, value uint8) {
 		case RegInterruptEnable:
 			v.registers[reg] = value
 			v.checkInterrupts()
-
-		// Read-only registers
-		case RegSpriteCollision, RegSpriteBgCollision:
-			return
 
 		case RegMemPointers:
 			v.registers[reg] = value
