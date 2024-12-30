@@ -369,6 +369,14 @@ func (c *C64) RenderFrame(buffer []uint8) error {
 		colorIndex := buffer[i] & 0x0F // Get color index (0-15)
 		color := C64Colors[colorIndex]
 
+		y := i / 320
+		x := i - (y * 320)
+		if y >= 51 && y <= 70 && x >= 40 && x <= 47 {
+			if colorIndex == 1 {
+				fmt.Println("color", colorIndex, x, y)
+			}
+		}
+
 		// Convert 32-bit color to RGBA components
 		pixelOffset := i * 4
 		c.pixels[pixelOffset+0] = byte((color >> 16) & 0xFF) // R
