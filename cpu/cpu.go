@@ -221,6 +221,8 @@ type CPU struct {
 
 	// Memory interface instead of direct array
 	Bus MemoryBus
+
+	err error
 }
 
 // Status flag bits
@@ -282,6 +284,10 @@ func (c *CPU) Step() uint8 {
 
 	// Decode and Execute
 	return c.execute(opcode)
+}
+
+func (c *CPU) Error() error {
+	return c.err
 }
 
 // execute processes a single opcode
@@ -1145,7 +1151,7 @@ func (c *CPU) execute(opcode uint8) uint8 {
 		return 6
 
 	default:
-		panic(fmt.Sprintf("Unknown opcode: 0x%02X at 0x%04X", opcode, c.PC))
+		c.err = fmt.Errorf("unknown opcode: 0x%02X at 0x%04X", opcode, c.PC)
 	}
 	return 0
 }
@@ -1554,7 +1560,7 @@ func (c *CPU) HandleNMI() {
 
 func (c *CPU) checkPC() {
 	if c.PC == 0x82 {
-		fmt.Println("PC is 0x82")
+		//fmt.Println("PC is 0x82")
 	}
 }
 

@@ -373,6 +373,11 @@ func (m *Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Execute step until we hit a breakpoint
 		for cycles := 0; cycles < 10_000; {
 			cycles += int(m.stepper.Step())
+			if err := m.cpu.Error(); err != nil {
+				m.Write([]byte(fmt.Sprintf("Error: %v", err)))
+				m.paused = true
+				break
+			}
 			if m.nextTo == m.cpu.PC || m.breakpoints[m.cpu.PC] {
 				m.nextTo = 0
 				m.paused = true
@@ -402,6 +407,11 @@ func (m *Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Execute step
 		m.stepper.Step()
+		if err := m.cpu.Error(); err != nil {
+			m.Write([]byte(fmt.Sprintf("Error: %v", err)))
+			m.paused = true
+			break
+		}
 		m.relocate(m.cpu.PC)
 
 		// Continue stepping
@@ -482,6 +492,11 @@ func (m *Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.captureState()
 				m.stepper.Step()
+				if err := m.cpu.Error(); err != nil {
+					m.Write([]byte(fmt.Sprintf("Error: %v", err)))
+					m.paused = true
+					break
+				}
 				m.relocate(m.cpu.PC)
 			}
 

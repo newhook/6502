@@ -10,7 +10,7 @@ import (
 	"github.com/newhook/6502/mon/monitor"
 )
 
-var runMonitor = true
+var runMonitor = false
 
 func main() {
 	computer, err := c64.NewC64()
@@ -62,6 +62,9 @@ func main() {
 		// Main emulation loop
 		for computer.IsRunning() {
 			computer.Step()
+			if err := computer.CPU.Error(); err != nil {
+				panic(err)
+			}
 
 			// Optional: Add delay to match real C64 speed
 			//if computer.Timing.ShouldDelay() {

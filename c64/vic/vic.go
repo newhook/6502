@@ -318,7 +318,6 @@ func (v *VIC) generateDisplayData() {
 	// Get character from screen RAM (screen matrix)
 	// Screen RAM location is determined by memory pointers register
 	screenAddr := v.videoMatrix + charIndex
-	//fmt.Printf("%x\n", screenAddr)
 	char := v.mem.Read(screenAddr)
 
 	// Get character color from color RAM ($D800-$DBFF)
@@ -327,9 +326,6 @@ func (v *VIC) generateDisplayData() {
 
 	// Get character data from character ROM/RAM
 	// Character memory location determined by memory pointers register
-	// XXX: cia.
-	//charDataAddr := v.charGen + (uint16(char) * 8) + uint16(charLine)
-	//charData := v.mem.Read(charDataAddr)
 	charData := v.mem.ReadChar(uint16(char)*8 + charLine)
 
 	// Calculate where in display buffer to put the pixels
