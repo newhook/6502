@@ -275,6 +275,7 @@ func (c *CPU) Reset() {
 
 // Step executes one instruction and returns number of cycles used
 func (c *CPU) Step() uint8 {
+	c.checkPC()
 	// Fetch
 	opcode := c.Read(c.PC)
 	c.PC++
@@ -285,9 +286,6 @@ func (c *CPU) Step() uint8 {
 
 // execute processes a single opcode
 func (c *CPU) execute(opcode uint8) uint8 {
-	if c.PC == 0xEA87 {
-		//fmt.Println("Breakpoint")
-	}
 	switch opcode {
 	case LDA_IMM:
 		c.A = c.readImmediate()
@@ -1058,6 +1056,7 @@ func (c *CPU) execute(opcode uint8) uint8 {
 
 	case JMP_ABS:
 		c.PC = c.readAbsoluteAddress()
+		c.checkPC()
 		return 3
 
 	case JMP_IND:
@@ -1070,6 +1069,7 @@ func (c *CPU) execute(opcode uint8) uint8 {
 		} else {
 			c.PC = uint16(c.Read(uint16(addr))) | uint16(c.Read(addr+1))<<8
 		}
+		c.checkPC()
 		return 5
 
 	case JSR_ABS:
@@ -1077,10 +1077,12 @@ func (c *CPU) execute(opcode uint8) uint8 {
 		// Push address of next instruction minus 1
 		c.push16(c.PC - 1)
 		c.PC = addr
+		c.checkPC()
 		return 6
 
 	case RTS:
 		c.PC = c.pull16() + 1
+		c.checkPC()
 		return 6
 
 	case BCC:
@@ -1129,6 +1131,7 @@ func (c *CPU) execute(opcode uint8) uint8 {
 		c.P |= FlagI        // Set interrupt disable flag
 		// Load IRQ vector
 		c.PC = uint16(c.Read(0xFFFE)) | uint16(c.Read(0xFFFF))<<8
+		c.checkPC()
 		return 7
 
 	case NOP:
@@ -1137,11 +1140,12 @@ func (c *CPU) execute(opcode uint8) uint8 {
 	case RTI:
 		c.P = c.pull() & ^FlagB // Pull status, clear B flag
 		c.PC = c.pull16()       // Pull return address
+		c.checkPC()
 		//slog.Info(fmt.Sprintf("rti %x", c.PC))
 		return 6
 
 	default:
-		panic(fmt.Sprintf("Unknown opcode: 0x%02X", opcode))
+		panic(fmt.Sprintf("Unknown opcode: 0x%02X at 0x%04X", opcode, c.PC))
 	}
 	return 0
 }
@@ -1155,6 +1159,7 @@ func (c *CPU) branch(condition bool) uint8 {
 
 	oldPC := c.PC
 	c.PC = uint16(int32(c.PC) + int32(offset))
+	c.checkPC()
 
 	// Extra cycle if branch crosses page boundary
 	if (oldPC & 0xFF00) != (c.PC & 0xFF00) {
@@ -1523,6 +1528,7 @@ func (c *CPU) HandleIRQ() {
 
 	// Load IRQ vector from $FFFE-$FFFF
 	c.PC = uint16(c.Read(0xFFFE)) | uint16(c.Read(0xFFFF))<<8
+	c.checkPC()
 	//slog.Info(fmt.Sprintf("irq %x", c.PC))
 
 	// IRQ takes 7 cycles
@@ -1539,10 +1545,17 @@ func (c *CPU) HandleNMI() {
 
 	// Load NMI vector from $FFFA-$FFFB
 	c.PC = uint16(c.Read(0xFFFA)) | uint16(c.Read(0xFFFB))<<8
+	c.checkPC()
 	//fmt.Printf("nmi %x\n", c.PC)
 
 	// IRQ takes 7 cycles
 	//c.Cycles += 7
+}
+
+func (c *CPU) checkPC() {
+	if c.PC == 0x82 {
+		fmt.Println("PC is 0x82")
+	}
 }
 
 type CPUAndMemory struct {

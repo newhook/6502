@@ -353,6 +353,7 @@ func (c *C64) RenderFrame(buffer []uint8) error {
 	//	fmt.Printf("\n")
 	//}
 	// Handle SDL events
+	c.keyboard.Tick()
 	for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
 		//fmt.Println(reflect.TypeOf(event))
 		switch event.(type) {

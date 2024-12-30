@@ -1,10 +1,12 @@
 package c64
 
 import (
+	"errors"
 	"fmt"
 	"github.com/newhook/6502/c64/cia"
 	"github.com/veandco/go-sdl2/sdl"
 	"log/slog"
+	"unicode"
 )
 
 // SDLKeyMapping maps SDL scancodes to C64 matrix positions
@@ -135,6 +137,12 @@ type Key struct {
 type Keyboard struct {
 	Matrix *KeyMatrix
 	CIA    *cia.CIA
+
+	pasting     bool
+	lastTick    uint64
+	pastebuffer string
+	keydown     *Key
+	shift       bool
 }
 
 // NewKeyboard creates a new C64 keyboard
@@ -145,6 +153,14 @@ func NewKeyboard() *Keyboard {
 }
 
 func (k *Keyboard) HandleSDLEvent(event sdl.Event) {
+	// Handle paste hotkey
+	if e, ok := event.(*sdl.KeyboardEvent); ok && e.Keysym.Scancode == sdl.SCANCODE_F10 && e.Type == sdl.KEYDOWN {
+		if err := k.PasteFromClipboard(); err != nil {
+			slog.Error("Failed to paste from clipboard", "error", err)
+		}
+		return
+	}
+
 	switch e := event.(type) {
 	case *sdl.KeyboardEvent:
 		if mapping, exists := SDLKeyMapping[e.Keysym.Scancode]; exists {
@@ -155,62 +171,8 @@ func (k *Keyboard) HandleSDLEvent(event sdl.Event) {
 				slog.Info(fmt.Sprintf("keyup %s %x %x", mapping.Symbol, mapping.Row, mapping.Col))
 				k.Matrix.KeyRelease(mapping.Row, mapping.Col)
 			}
-
-			// Trigger a keyboard scan after state change
-			k.ScanKeyboard()
 		}
 	}
-}
-
-// ScanKeyboard performs a keyboard matrix scan
-// This simulates how the C64 ROM would scan the keyboard
-func (k *Keyboard) ScanKeyboard() byte {
-	return 0
-	// The C64 sets a row low by writing to CIA1 Port A
-	// Then reads the column states from CIA1 Port B
-
-	// Get the current row selection from Port A
-	// Inverted because 0 selects a row
-	portA := k.CIA.ReadRegister(cia.PRA)
-	slog.Info(fmt.Sprintf("port a %x", portA))
-	rowSelect := ^k.CIA.ReadRegister(cia.PRA)
-	slog.Info(fmt.Sprintln("row select", rowSelect))
-
-	var result byte = 0xFF
-
-	// Check each row that is selected (0 bit in rowSelect)
-	for row := 0; row < 8; row++ {
-		if rowSelect&(1<<row) != 0 {
-			// This row is selected (low)
-			// Get the key states for this row
-			rowState := k.Matrix.ReadRow(row)
-
-			// Combine with result
-			// A 0 bit means a key is pressed
-			result &= ^rowState
-		}
-	}
-
-	slog.Info(fmt.Sprintln("write portb", result))
-
-	// Update CIA Port B with the result
-	k.CIA.WriteRegister(cia.PRB, result)
-
-	return result
-}
-
-// WritePortA writes to CIA1 Port A
-// This is called when the CPU writes to $DC00
-func (k *Keyboard) WritePortA(value byte) {
-	k.CIA.WriteRegister(cia.PRA, value)
-	// Trigger a keyboard scan when Port A changes
-	k.ScanKeyboard()
-}
-
-// ReadPortB reads from CIA1 Port B
-// This is called when the CPU reads from $DC01
-func (k *Keyboard) ReadPortB() byte {
-	return ^k.CIA.ReadRegister(cia.PRB)
 }
 
 func (k *Keyboard) GetState(selectedRows uint8) uint8 {
@@ -228,4 +190,176 @@ func (k *Keyboard) GetState(selectedRows uint8) uint8 {
 	}
 
 	return value
+}
+
+func (k *Keyboard) SimulateTextInput(text string) {
+	for _, char := range text {
+		// Find matching key mapping
+		var key Key
+		found := false
+
+		// Convert character to uppercase since C64 keyboard is caps
+		upperChar := unicode.ToUpper(char)
+
+		// Search through mappings
+		for _, mapping := range SDLKeyMapping {
+			if mapping.Symbol == string(upperChar) {
+				key = mapping
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			continue
+		}
+
+		// Simulate key press
+		k.Matrix.KeyPress(key.Row, key.Col)
+
+		// Small delay to simulate typing
+		sdl.Delay(50)
+
+		// Release key
+		k.Matrix.KeyRelease(key.Row, key.Col)
+	}
+}
+
+const pasteText = `
+10 v=53248:pokev+21,1:poke 2040,192:fort=12288to12350:poket,255:next
+20 pokev+39,1
+25 x=0:y=50
+30 pokev,x:pokev+1,y
+35 wait53265,128
+38 x=x+1:ifx>255thenend
+40 goto 30
+`
+
+func (k *Keyboard) PasteFromClipboard() error {
+	k.pasting = true
+	k.pastebuffer = pasteText
+	return nil
+
+	if !sdl.HasClipboardText() {
+		return errors.New("clipboard is empty")
+	}
+
+	text, err := sdl.GetClipboardText()
+	if err != nil {
+		return fmt.Errorf("failed to get clipboard text: %v", err)
+	}
+	k.pasting = true
+	k.pastebuffer = text
+	return nil
+}
+
+const TickDelta = 5
+
+func (k *Keyboard) Tick() {
+	if !k.pasting {
+		return
+	}
+
+	currentTick := sdl.GetTicks64()
+	delta := currentTick - k.lastTick
+	if delta < TickDelta {
+		return
+	}
+
+	k.lastTick = currentTick
+
+	if k.keydown != nil {
+		k.Matrix.KeyRelease(k.keydown.Row, k.keydown.Col)
+		if k.shift {
+			k.Matrix.KeyRelease(1, 7) // left shift.
+		}
+		k.keydown = nil
+		k.shift = false
+	}
+
+	if len(k.pastebuffer) == 0 {
+		k.pasting = false
+		return
+	}
+
+	char := rune(k.pastebuffer[0])
+	k.pastebuffer = k.pastebuffer[1:]
+
+	// Convert character to uppercase since C64 keyboard is caps
+	upperChar := unicode.ToUpper(char)
+	key, ok := ASCIIToKeyMap[upperChar]
+	if !ok {
+		k.pasting = false
+		return
+	}
+
+	// Simulate key press
+	k.keydown = &key
+	k.Matrix.KeyPress(k.keydown.Row, k.keydown.Col)
+
+	if ShiftKeyMap[upperChar] {
+		k.Matrix.KeyPress(1, 7) // left shift.
+		k.shift = true
+	}
+}
+
+var ASCIIToKeyMap = map[rune]Key{
+	'A':  {1, 2, "A"},
+	'B':  {3, 4, "B"},
+	'C':  {2, 4, "C"},
+	'D':  {2, 2, "D"},
+	'E':  {1, 6, "E"},
+	'F':  {2, 5, "F"},
+	'G':  {3, 2, "G"},
+	'H':  {3, 5, "H"},
+	'I':  {4, 1, "I"},
+	'J':  {4, 2, "J"},
+	'K':  {4, 5, "K"},
+	'L':  {5, 2, "L"},
+	'M':  {4, 4, "M"},
+	'N':  {4, 7, "N"},
+	'O':  {4, 6, "O"},
+	'P':  {5, 1, "P"},
+	'Q':  {7, 6, "Q"},
+	'R':  {2, 1, "R"},
+	'S':  {1, 5, "S"},
+	'T':  {2, 6, "T"},
+	'U':  {3, 6, "U"},
+	'V':  {3, 7, "V"},
+	'W':  {1, 1, "W"},
+	'X':  {2, 7, "X"},
+	'Y':  {3, 1, "Y"},
+	'Z':  {1, 4, "Z"},
+	'1':  {7, 0, "1"},
+	'2':  {7, 3, "2"},
+	'3':  {1, 0, "3"},
+	'4':  {1, 3, "4"},
+	'5':  {2, 0, "5"},
+	'6':  {2, 3, "6"},
+	'7':  {3, 0, "7"},
+	'8':  {3, 3, "8"},
+	'9':  {4, 0, "9"},
+	'0':  {4, 3, "0"},
+	' ':  {7, 4, "SPACE"},
+	'\n': {0, 1, "RETURN"},
+	',':  {5, 7, "COMMA"},
+	'.':  {5, 4, "PERIOD"},
+	';':  {6, 2, "SEMICOLON"},
+	':':  {5, 5, "COLON"},
+	'/':  {6, 7, "SLASH"},
+	'=':  {6, 5, "EQUALS"},
+	'-':  {5, 3, "MINUS"},
+	'\'': {7, 3, "QUOTE"},
+	'\\': {6, 6, "LEFT ARROW"},
+	'@':  {5, 6, "AT"},
+	'*':  {6, 1, "ASTERISK"},
+	'£':  {7, 1, "POUND"},
+	'+':  {5, 0, "PLUS"},
+	'<':  {5, 7, "COMMA"},  // SHIFT + ,
+	'>':  {5, 4, "PERIOD"}, // SHIFT + .
+}
+
+var ShiftKeyMap = map[rune]bool{
+	'<': true,
+	'>': true,
 }
