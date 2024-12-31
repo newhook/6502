@@ -47,14 +47,28 @@ const (
 	FIRST_VISIBLE_LINE = 14
 	LAST_VISIBLE_LINE  = 298
 
-	// Border timing
+	// The width of the display window can each be set to two different
+	// values with the bits CSEL in the register $d016:
+	//
+	// CSEL|   Display window width   | First X coo. | Last X coo.
+	// ----+--------------------------+--------------+------------
+	// 0 | 38 characters/304 pixels |   31 ($1f)   |  334 ($14e)
+	// 1 | 40 characters/320 pixels |   24 ($18)   |  343 ($157)
+
+	SCREEN_WIDTH       = 403
 	LEFT_BORDER_START  = 0
 	LEFT_BORDER_END    = 24
 	VISIBLE_WIDTH      = 320
 	RIGHT_BORDER_START = LEFT_BORDER_END + VISIBLE_WIDTH
 
-	// VIC-II Timing Constants
-	SCREEN_WIDTH       = 403
+	// The height of the display window can each be set to two different
+	// values with the bits RSEL in the register $d011.
+	//
+	// RSEL|  Display window height   | First line  | Last line
+	// ----+--------------------------+-------------+----------
+	// 0 | 24 text lines/192 pixels |   55 ($37)  | 246 ($f6)
+	// 1 | 25 text lines/200 pixels |   51 ($33)  | 250 ($fa)
+
 	FIRST_DISPLAY_LINE = 51
 	LAST_DISPLAY_LINE  = 251
 
@@ -711,7 +725,8 @@ func (v *VIC) WriteRegister(reg uint8, value uint8) {
 
 	// Registers $D000-$D01F can only be written during VBlank or the screen area
 	rasterX, rasterY := v.GetRasterPosition()
-	if (rasterY < 51 || rasterY > 251) || rasterX < 58 {
+	// XXX: not sure what 58 means here.
+	if (rasterY < FIRST_DISPLAY_LINE || rasterY > LAST_DISPLAY_LINE) || rasterX < 58 {
 		switch reg {
 		case RegSprite0X, RegSprite1X, RegSprite2X, RegSprite3X,
 			RegSprite4X, RegSprite5X, RegSprite6X, RegSprite7X:
