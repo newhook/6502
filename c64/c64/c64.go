@@ -199,7 +199,7 @@ func NewC64() (*C64, error) {
 
 	window, err := sdl.CreateWindow("C64 Emulator",
 		sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED,
-		640, 400, // Double the original resolution for better visibility
+		vic.PAL_FULL_WIDTH*2, vic.PAL_FULL_HEIGHT*2, // Double the original resolution for better visibility
 		sdl.WINDOW_SHOWN)
 	if err != nil {
 		return nil, err
@@ -217,7 +217,7 @@ func NewC64() (*C64, error) {
 	texture, err := renderer.CreateTexture(
 		uint32(sdl.PIXELFORMAT_ABGR8888),
 		sdl.TEXTUREACCESS_STREAMING,
-		320, 200)
+		vic.PAL_FULL_WIDTH, vic.PAL_FULL_HEIGHT)
 	if err != nil {
 		if err := renderer.Destroy(); err != nil {
 			fmt.Println(err)
@@ -244,7 +244,7 @@ func NewC64() (*C64, error) {
 		window:   window,
 		renderer: renderer,
 		texture:  texture,
-		pixels:   make([]byte, 320*200*4),
+		pixels:   make([]byte, vic.PAL_FULL_WIDTH*vic.PAL_FULL_HEIGHT*4),
 		running:  true,
 		keyboard: kb,
 	}
@@ -268,7 +268,7 @@ func (c *C64) Step() uint8 {
 		c.Timing.Step()
 
 		// Update VIC-II
-		if event := c.VIC.Update(1); event != nil {
+		if event := c.VIC.Update(); event != nil {
 			switch event.Type {
 			case vic.EventRasterIRQ:
 				//c.CPU.TriggerIRQ()
@@ -369,14 +369,6 @@ func (c *C64) RenderFrame(buffer []uint8) error {
 		colorIndex := buffer[i] & 0x0F // Get color index (0-15)
 		color := C64Colors[colorIndex]
 
-		y := i / 320
-		x := i - (y * 320)
-		if y >= 51 && y <= 70 && x >= 40 && x <= 47 {
-			if colorIndex == 1 {
-				fmt.Println("color", colorIndex, x, y)
-			}
-		}
-
 		// Convert 32-bit color to RGBA components
 		pixelOffset := i * 4
 		c.pixels[pixelOffset+0] = byte((color >> 16) & 0xFF) // R
@@ -386,7 +378,7 @@ func (c *C64) RenderFrame(buffer []uint8) error {
 	}
 
 	// Update texture with new pixel data
-	if err := c.texture.Update(nil, unsafe.Pointer(&c.pixels[0]), 320*4); err != nil {
+	if err := c.texture.Update(nil, unsafe.Pointer(&c.pixels[0]), vic.PAL_FULL_WIDTH*4); err != nil {
 		return err
 	}
 

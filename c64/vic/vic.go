@@ -1,7 +1,6 @@
 package vic
 
 import (
-	"fmt"
 	"github.com/newhook/6502/c64/memory"
 	"log"
 )
@@ -39,27 +38,79 @@ const (
 	//  6567R8   |   13   |   40    |  412 ($19c)  | 489 ($1e9) | 396 ($18c)
 	//  6569     |  300   |   15    |  404 ($194)  | 480 ($1e0) | 380 ($17c)
 	//
-	// For PAL-B timings.
-	CYCLES_PER_LINE = 63  // CPU cycles per line
-	TOTAL_LINES     = 312 // Total raster lines
-
-	// 298-14 = 284 visible lines
-	FIRST_VISIBLE_LINE = 14
-	LAST_VISIBLE_LINE  = 298
 
 	// The width of the display window can each be set to two different
 	// values with the bits CSEL in the register $d016:
 	//
 	// CSEL|   Display window width   | First X coo. | Last X coo.
 	// ----+--------------------------+--------------+------------
-	// 0 | 38 characters/304 pixels |   31 ($1f)   |  334 ($14e)
-	// 1 | 40 characters/320 pixels |   24 ($18)   |  343 ($157)
+	// 0 | 38 characters/304 pixels   |   31 ($1f)   |  334 ($14e)
+	// 1 | 40 characters/320 pixels   |   24 ($18)   |  343 ($157)
 
-	SCREEN_WIDTH       = 403
-	LEFT_BORDER_START  = 0
-	LEFT_BORDER_END    = 24
-	VISIBLE_WIDTH      = 320
-	RIGHT_BORDER_START = LEFT_BORDER_END + VISIBLE_WIDTH
+	// This vic-ii emulates the 6569 (PAL-B).
+	CYCLES_PER_LINE = 63 // CPU cycles per line
+
+	// TOTAL_WIDTH for PAL there are 504 total pixels per line.
+	TOTAL_WIDTH = 504
+	// SCREEN_HEIGHT represent the visible area of the display.
+	// XXX: rename VISIBLE_WIDTH.
+
+	// First visible border starts at cycle 11 (91 pixels from left)
+	// Start of visible screen area at cycle 15 (up to cycle 55)
+	// Right border begins at cycle 55
+	// Horizontal blank starts at cycle 63
+	// Each cycle is 8 pixels wide
+
+	//Key timing points:
+	// - Line starts at cycle 0
+	// - Left border starts: cycle 11
+	// - Main screen area: cycles 15-54 (40 columns × 8 pixels)
+	// - Right border begins: cycle 55
+	// - Horizontal sync: cycles 58-62
+	// - Line ends: cycle 63
+
+	// Pal is 403x284, but to make it divisible by 8 we use 408,288.
+	PAL_FULL_WIDTH  = 408
+	PAL_FULL_HEIGHT = 288
+
+	SCREEN_WIDTH = 403
+	// VISIBLE_WIDTH is the portion of the display in between each border.
+	LEFT_BORDER_CYCLE_START  = 11
+	LEFT_BORDER_CYCLE_END    = 17
+	RIGHT_BORDER_CYCLE_START = 57
+	RIGHT_BORDER_CYCLE_END   = 61
+	VISIBLE_WIDTH            = 320
+	LEFT_BORDER_START        = 0
+	LEFT_BORDER_END          = 24
+	RIGHT_BORDER_START       = LEFT_BORDER_END + VISIBLE_WIDTH
+
+	// For the VIC-II PAL (6569) vertical timing:
+	// Total scanlines: 312 (PAL)
+	// Breakdown:
+	// Top border area:
+	// - Starts at line 0
+	// - First visible line starts at line 16
+	// - Upper border ends at line 51
+	// Main display area:
+	// - Starts at line 51
+	// - 200 visible lines (PAL mode)
+	// - Each character row is 8 scanlines high
+	// - 25 rows of text in normal text mode
+	// Bottom border area:
+	// - Starts at line 251
+	// - Continues to line 311
+
+	// TOTAL_LINES For PAL there are 312 total lines
+	TOTAL_LINES = 312 // Total raster lines
+	// SCREEN_HEIGHT represent the visible area of the display.
+	SCREEN_HEIGHT = 284
+	// VISIBLE_HEIGHT is the visible portion of the display.
+	VISIBLE_HEIGHT     = 200
+	FIRST_VISIBLE_LINE = 16
+	LAST_VISIBLE_LINE  = 298
+	// 298-14 = 284 visible lines
+	FIRST_DISPLAY_LINE = 51
+	LAST_DISPLAY_LINE  = 251
 
 	// The height of the display window can each be set to two different
 	// values with the bits RSEL in the register $d011.
@@ -68,9 +119,6 @@ const (
 	// ----+--------------------------+-------------+----------
 	// 0 | 24 text lines/192 pixels |   55 ($37)  | 246 ($f6)
 	// 1 | 25 text lines/200 pixels |   51 ($33)  | 250 ($fa)
-
-	FIRST_DISPLAY_LINE = 51
-	LAST_DISPLAY_LINE  = 251
 
 	// Memory locations
 	SPRITE_POINTER_BASE = 0x07F8
@@ -220,8 +268,9 @@ const (
 
 func NewVIC(mem *memory.Manager) *VIC {
 	vic := &VIC{
-		mem:           mem,
-		displayBuffer: make([]uint8, 320*200),
+		mem: mem,
+		// Pal is 403x284, but to make it divisible by 8 we use 408,288.
+		displayBuffer: make([]uint8, PAL_FULL_WIDTH*PAL_FULL_HEIGHT),
 		colorBuffer:   make([]uint8, VISIBLE_WIDTH),
 	}
 	vic.registers[RegBgColor0] = 0x0E       // Background color 0 (light blue)
@@ -252,9 +301,9 @@ type VIC struct {
 	registers [NUM_REGISTERS]uint8
 
 	// Raster beam position
-	rasterCounter uint16 // y position (0 - 311) pal.
-	rasterCycle   uint8  // x position (0 - 63).
-	frameCount    uint64
+	rasterLine  uint16 // y position (0 - 311) pal.
+	rasterCycle uint8  // x position (1 - 63).
+	frameCount  uint64
 
 	// Display state
 	displayMode   DisplayMode
@@ -283,40 +332,36 @@ type VIC struct {
 }
 
 // Update processes one VIC-II cycle
-func (v *VIC) Update(cycle uint8) *VICEvent {
-	v.rasterCycle += cycle
+func (v *VIC) Update() *VICEvent {
+	v.rasterCycle++
 
 	// Check for bad line condition
 	v.updateBadLine()
 
 	// Handle display and sprite generation based on cycle
-	if v.rasterCounter >= FIRST_VISIBLE_LINE && v.rasterCounter < LAST_VISIBLE_LINE {
-		// Sprite data fetch cycles (cycles 55-61 of previous line and 0-2 of current line)
-		if (v.rasterCycle >= 55 && v.rasterCycle <= 61) || (v.rasterCycle <= 2) {
-			spriteIndex := uint8(0)
-			if v.rasterCycle <= 2 {
-				spriteIndex = v.rasterCycle + 7
-			} else {
-				spriteIndex = v.rasterCycle - 55
-			}
-			if spriteIndex < NUM_SPRITES && v.sprites[spriteIndex].enabled {
-				v.fetchSpriteData(spriteIndex)
-			}
+	if v.rasterLine >= FIRST_VISIBLE_LINE && v.rasterLine < LAST_VISIBLE_LINE {
+		// Sprite data fetch cycles.
+		switch v.rasterCycle {
+		case 58:
+			v.fetchSpriteData(0)
+		case 60:
+			v.fetchSpriteData(1)
+		case 62:
+			v.fetchSpriteData(2)
+		case 1:
+			v.fetchSpriteData(3)
+		case 3:
+			v.fetchSpriteData(4)
+		case 5:
+			v.fetchSpriteData(5)
+		case 7:
+			v.fetchSpriteData(6)
+		case 9:
+			v.fetchSpriteData(7)
 		}
 
 		// Character/bitmap fetch and display cycles (cycles 13-53)
-		if v.rasterCycle >= 13 && v.rasterCycle < 53 {
-			v.generateDisplayData()
-		}
-
-		// Sprite rendering cycles (cycles 15-55)
-		// Note: This actually happens alongside character/bitmap fetching
-		if v.rasterCycle >= 15 && v.rasterCycle < 55 {
-			spriteIndex := (v.rasterCycle - 15) / 2
-			if spriteIndex < NUM_SPRITES && v.sprites[spriteIndex].enabled {
-				v.renderSpriteColumn(uint8(spriteIndex))
-			}
-		}
+		v.generateDisplayData()
 	}
 
 	// Handle sprite DMA and collision detection
@@ -325,16 +370,16 @@ func (v *VIC) Update(cycle uint8) *VICEvent {
 	// Update raster position
 	if v.rasterCycle >= CYCLES_PER_LINE {
 		v.rasterCycle = 0
-		v.rasterCounter++
+		v.rasterLine++
 
-		if v.rasterCounter >= TOTAL_LINES {
-			v.rasterCounter = 0
+		if v.rasterLine >= TOTAL_LINES {
+			v.rasterLine = 0
 			v.frameCount++
 			return &VICEvent{Type: EventFrameComplete}
 		}
 
 		// Check for raster IRQ
-		if v.rasterCounter == v.rasterIRQ && v.registers[RegInterruptEnable]&0x01 != 0 {
+		if v.rasterLine == v.rasterIRQ && v.registers[RegInterruptEnable]&0x01 != 0 {
 			v.irqStatus |= 0x01
 			return &VICEvent{Type: EventRasterIRQ}
 		}
@@ -349,30 +394,109 @@ func (v *VIC) renderSpriteColumn(spriteNum uint8) {
 
 	// Check if sprite is visible on current raster line
 	spriteY := int16(sprite.y)
-	currentY := int16(v.rasterCounter - FIRST_VISIBLE_LINE)
+	currentY := int16(v.rasterLine - 50)
 	spriteHeight := int16(21)
 	if sprite.yExpand {
 		spriteHeight *= 2
 	}
 
 	// Skip if sprite not visible on this line
-	if currentY < int16(spriteY) || currentY >= int16(spriteY)+spriteHeight {
+	if currentY < spriteY || currentY >= spriteY+spriteHeight {
+		return
+	}
+
+	x := int(sprite.x) + 24
+
+	// Render 4 pixels worth of sprite data (2 cycles worth)
+	// Calculate row in sprite data
+	spriteRow := currentY - int16(sprite.y)
+	if sprite.yExpand {
+		spriteRow /= 2
+	}
+
+	// Get sprite data for this row
+	spriteDataPtr := uint16(sprite.dataPtr) * 64
+	spriteColor := v.registers[RegSprite0Color+spriteNum]
+
+	// Calculate buffer offset
+	//bufferOffset := int(currentY-15) * PAL_FULL_WIDTH
+	bufferOffset := int(currentY) * PAL_FULL_WIDTH
+
+	for i := uint16(0); i < 3; i++ {
+		dataByte := v.mem.Read(spriteDataPtr + uint16(spriteRow)*3 + i)
+		// Render 4 pixels
+		for j := 0; j < 8; j++ {
+			if (dataByte & (1 << j)) == 0 {
+				continue
+			}
+			if sprite.multicolor {
+				// Handle multicolor mode
+				if i%2 == 0 { // Only process on even pixels
+					////colorBits := (bits >> (2 - (i/2)*2)) & 0x03
+					//var color uint8
+					//switch colorBits {
+					//case 1:
+					//	color = v.registers[RegSpriteMulti0]
+					//case 2:
+					//	color = spriteColor
+					//case 3:
+					//	color = v.registers[RegSpriteMulti1]
+					//default:
+					//	continue // Transparent
+					//}
+					//_ = color
+
+					//pixelX := startX + int(i)
+					//if sprite.xExpand {
+					//	v.plotSpritePixel(bufferOffset, pixelX*2, color, sprite.priority)
+					//	v.plotSpritePixel(bufferOffset, pixelX*2+1, color, sprite.priority)
+					//} else {
+					//	v.plotSpritePixel(bufferOffset, pixelX, color, sprite.priority)
+					//}
+				}
+			} else {
+				newX := x + int(i)*8 + 8 - j
+				v.displayBuffer[bufferOffset+newX] = spriteColor
+			}
+		}
+	}
+}
+
+// renderSpriteColumn handles rendering a single column (2 cycles worth) of a sprite
+func (v *VIC) renderSpriteColumnX(spriteNum uint8) {
+	sprite := &v.sprites[spriteNum]
+
+	// Check if sprite is visible on current raster line
+	spriteY := int16(sprite.y)
+	currentY := int16(v.rasterLine - 50)
+	spriteHeight := int16(21)
+	if sprite.yExpand {
+		spriteHeight *= 2
+	}
+
+	// Skip if sprite not visible on this line
+	if currentY < spriteY || currentY >= spriteY+spriteHeight {
 		return
 	}
 
 	// Calculate which part of the sprite we're rendering
-	spriteColumn := (v.rasterCycle - 15) % (SPRITE_WIDTH / 4) // 6 cycles per sprite (24 pixels/4)
-	startX := int16(sprite.x) + int16(spriteColumn*4)
+	spriteColumn := (v.rasterCycle - LEFT_BORDER_CYCLE_END) % (SPRITE_WIDTH / 4) // 6 cycles per sprite (24 pixels/4)
+	//startX := int(v.rasterCycle-LEFT_BORDER_CYCLE_END) + int(sprite.x) + int(spriteColumn*4)
+
+	// X=0 corresponds to the start of the visible screen area (cycle 15)
+	// sprite.x gives us the offset in pixels from this point
+	baseX := int(sprite.x) + 24
+
+	// spriteColumn tells us which part of the sprite we're currently rendering
+	// each column is 4 pixels wide
+	columnOffset := int(spriteColumn * 4)
+
+	// Final X position is just the base position plus the column offset
+	startX := baseX + columnOffset
 
 	// Render 4 pixels worth of sprite data (2 cycles worth)
-	v.renderSpritePixels(spriteNum, startX, currentY, spriteColumn)
-}
-
-func (v *VIC) renderSpritePixels(spriteNum uint8, startX, y int16, column uint8) {
-	sprite := &v.sprites[spriteNum]
-
 	// Calculate row in sprite data
-	spriteRow := y - int16(sprite.y)
+	spriteRow := currentY - int16(sprite.y)
 	if sprite.yExpand {
 		spriteRow /= 2
 	}
@@ -382,15 +506,15 @@ func (v *VIC) renderSpritePixels(spriteNum uint8, startX, y int16, column uint8)
 	rowOffset := uint16(spriteRow) * 3 // 3 bytes per row
 
 	// Read sprite data and extract relevant bits for this column
-	dataByte := v.mem.Read(spriteDataPtr + rowOffset + uint16(column/2))
-	shift := (1 - (column % 2)) * 4 // 0 or 4 depending on which half of byte
+	dataByte := v.mem.Read(spriteDataPtr + rowOffset + uint16(spriteColumn/2))
+	shift := (1 - (spriteColumn % 2)) * 4 // 0 or 4 depending on which half of byte
 	bits := (dataByte >> shift) & 0x0F
 
 	// Get sprite colors
 	spriteColor := v.registers[RegSprite0Color+spriteNum]
 
 	// Calculate buffer offset
-	bufferOffset := int(y) * VISIBLE_WIDTH
+	bufferOffset := int(currentY-15) * PAL_FULL_WIDTH
 
 	// Render 4 pixels
 	for i := uint8(0); i < 4; i++ {
@@ -410,109 +534,31 @@ func (v *VIC) renderSpritePixels(spriteNum uint8, startX, y int16, column uint8)
 					continue // Transparent
 				}
 
-				pixelX := startX + int16(i)
+				pixelX := startX + int(i)
 				if sprite.xExpand {
-					v.plotSpritePixel(bufferOffset, int(pixelX*2), color, sprite.priority)
-					v.plotSpritePixel(bufferOffset, int(pixelX*2+1), color, sprite.priority)
+					v.plotSpritePixelX(bufferOffset, pixelX*2, color, sprite.priority)
+					v.plotSpritePixelX(bufferOffset, pixelX*2+1, color, sprite.priority)
 				} else {
-					v.plotSpritePixel(bufferOffset, int(pixelX), color, sprite.priority)
+					v.plotSpritePixelX(bufferOffset, pixelX, color, sprite.priority)
 				}
 			}
 		} else {
 			// Standard mode
 			if bits&(0x08>>(i)) != 0 {
-				pixelX := startX + int16(i)
+				pixelX := startX + int(i)
 				if sprite.xExpand {
-					v.plotSpritePixel(bufferOffset, int(pixelX*2), spriteColor, sprite.priority)
-					v.plotSpritePixel(bufferOffset, int(pixelX*2+1), spriteColor, sprite.priority)
+					v.plotSpritePixelX(bufferOffset, pixelX*2, spriteColor, sprite.priority)
+					v.plotSpritePixelX(bufferOffset, pixelX*2+1, spriteColor, sprite.priority)
 				} else {
-					v.plotSpritePixel(bufferOffset, int(pixelX), spriteColor, sprite.priority)
+					v.plotSpritePixelX(bufferOffset, pixelX, spriteColor, sprite.priority)
 				}
 			}
 		}
 	}
 }
 
-func (v *VIC) updateBadLine() {
-	// Bad line condition:
-	// 1. Current raster line is between 0x30-0xf7
-	// 2. Lower 3 bits of raster line match lower 3 bits of scroll register
-	// 3. Display enable bit is set
-	if v.rasterCounter >= 0x30 && v.rasterCounter <= 0xf7 {
-		if uint8(v.rasterCounter&0x07) == (v.registers[RegScreenControl1] & CTRL1_YSCROLL) {
-			if v.registers[RegScreenControl1]&CTRL1_DEN != 0 {
-				v.badLine = true
-				v.badLineEnable = true
-				return
-			}
-		}
-	}
-	v.badLine = false
-}
-
-func (v *VIC) generateDisplayData() {
-	rasterCounter := v.rasterCounter
-	rasterCycle := v.rasterCycle
-
-	// Only render during visible area
-	if rasterCounter < 56 || rasterCounter > 255 || rasterCycle < 13 || rasterCycle >= 53 {
-		return
-	}
-
-	// Calculate which character row and column we're rendering
-	charRow := (rasterCounter - 56) / 8           // Which row of characters
-	charCol := rasterCycle - 13                   // Which column in the current row
-	charIndex := (charRow * 40) + uint16(charCol) // Character position in screen RAM
-
-	// Calculate which line of the character we're drawing (0-7)
-	charLine := (rasterCounter - 56) % 8
-
-	// Get character from screen RAM (screen matrix)
-	// Screen RAM location is determined by memory pointers register
-	screenAddr := v.videoMatrix + charIndex
-	char := v.mem.Read(screenAddr)
-
-	// Get character color from color RAM ($D800-$DBFF)
-	colorAddr := 0xD800 + uint16(charIndex)
-	charColor := v.mem.Read(colorAddr)
-
-	// Get character data from character ROM/RAM
-	// Character memory location determined by memory pointers register
-	charData := v.mem.ReadChar(uint16(char)*8 + charLine)
-
-	// Calculate where in display buffer to put the pixels
-	bufferIndex := v.getCurrentPixelIndex(uint16(rasterCycle), rasterCounter)
-
-	// Render all 8 pixels for this character line
-	for bit := uint8(0); bit < 8; bit++ {
-		pixel := (charData >> (7 - bit)) & 1
-		if pixel == 1 {
-			v.displayBuffer[bufferIndex+int(bit)] = charColor
-		} else {
-			if bufferIndex+int(bit) == 16040 {
-				fmt.Printf("%d text=%x\n", v.rasterCycle, v.displayBuffer[bufferIndex+int(bit)])
-			}
-			v.displayBuffer[bufferIndex+int(bit)] = v.registers[RegBgColor0] // Background color
-		}
-	}
-
-	/*
-		switch v.displayMode {
-		case MODE_STANDARD_TEXT:
-			v.generateTextMode(pixelIndex, charIndex, xPos, yPos)
-		case MODE_MULTICOLOR_TEXT:
-			v.generateMulticolorText(pixelIndex, charIndex, xPos, yPos)
-		case MODE_STANDARD_BITMAP:
-			v.generateBitmapMode(pixelIndex, charIndex, xPos, yPos)
-		case MODE_MULTICOLOR_BITMAP:
-			v.generateMulticolorBitmap(pixelIndex, charIndex, xPos, yPos)
-
-	*/
-}
-
-// renderMulticolorSprite renders a multicolor sprite
 // plotSpritePixel plots a single sprite pixel to the display buffer
-func (v *VIC) plotSpritePixel(bufferOffset, x int, color uint8, priority bool) {
+func (v *VIC) plotSpritePixelX(bufferOffset, x int, color uint8, priority bool) {
 	// Check if pixel is within visible screen area
 	if x < 0 || x >= VISIBLE_WIDTH {
 		return
@@ -532,34 +578,124 @@ func (v *VIC) plotSpritePixel(bufferOffset, x int, color uint8, priority bool) {
 			v.displayBuffer[pixelIndex] = color
 		}
 	} else {
-		// Sprite appears in front of background
-		//y := pixelIndex / 320
-		//x := pixelIndex - (y * 320)
-		//fmt.Printf("i: %d x: %d, y: %d color: %d\n", pixelIndex, x, y, color)
-		if pixelIndex == 16040 {
-			fmt.Printf("sprite: %d color=%d\n", v.rasterCycle, color)
-		}
 		v.displayBuffer[pixelIndex] = color
 	}
 }
 
+func (v *VIC) updateBadLine() {
+	// Bad line condition:
+	// 1. Current raster line is between 0x30-0xf7
+	// 2. Lower 3 bits of raster line match lower 3 bits of scroll register
+	// 3. Display enable bit is set
+	if v.rasterLine >= 0x30 && v.rasterLine <= 0xf7 {
+		if uint8(v.rasterLine&0x07) == (v.registers[RegScreenControl1] & CTRL1_YSCROLL) {
+			if v.registers[RegScreenControl1]&CTRL1_DEN != 0 {
+				v.badLine = true
+				v.badLineEnable = true
+				return
+			}
+		}
+	}
+	v.badLine = false
+}
+
+// First visible border starts at cycle 11 (91 pixels from left)
+// Start of visible screen area at cycle 15 (up to cycle 55)
+// Right border begins at cycle 55
+// Horizontal blank starts at cycle 63
+// Each cycle is 8 pixels wide
+
+//For the VIC-II PAL (6569) horizontal timing:
+// - Line starts at cycle 0
+// - Left border starts: cycle 11
+// - Main screen area: cycles 15-54 (40 columns × 8 pixels)
+// - Right border begins: cycle 55
+// - Horizontal sync: cycles 58-62
+// - Line ends: cycle 63
+
+// For the VIC-II PAL (6569) vertical timing:
+// Total scanlines: 312 (PAL)
+// Breakdown:
+// Top border area:
+// - Starts at line 0
+// - First visible line starts at line 16
+// - Upper border ends at line 51
+// Main display area:
+// - Starts at line 51
+// - 200 visible lines (PAL mode)
+// - Each character row is 8 scanlines high
+// - 25 rows of text in normal text mode
+// Bottom border area:
+// - Starts at line 251
+// - Continues to line 311
+
+func (v *VIC) generateDisplayData() {
+	rasterLine := v.rasterLine
+	rasterCycle := v.rasterCycle
+
+	// Only render during visible area
+	if rasterLine < FIRST_VISIBLE_LINE || rasterLine >= LAST_VISIBLE_LINE ||
+		rasterCycle < LEFT_BORDER_CYCLE_START || rasterCycle >= RIGHT_BORDER_CYCLE_END {
+		return
+	}
+
+	// Calculate where in display buffer to put the pixels
+	bufferIndex := v.getCurrentPixelIndex(uint16(rasterCycle), rasterLine)
+
+	// border.
+	if rasterLine < FIRST_DISPLAY_LINE || rasterLine >= LAST_DISPLAY_LINE ||
+		rasterCycle < LEFT_BORDER_CYCLE_END || rasterCycle >= RIGHT_BORDER_CYCLE_START {
+		// Render all 8 pixels for this character line
+		for bit := uint8(0); bit < 8; bit++ {
+			v.displayBuffer[bufferIndex+int(bit)] = v.registers[RegBorderColor] // Background color
+		}
+		return
+	}
+
+	// Calculate which character row and column we're rendering
+	charRow := (rasterLine - FIRST_DISPLAY_LINE) / 8 // Which row of characters
+	charCol := rasterCycle - LEFT_BORDER_CYCLE_END   // Which column in the current row
+	charIndex := (charRow * 40) + uint16(charCol)    // Character position in screen RAM
+
+	// Calculate which line of the character we're drawing (0-7)
+	charLine := (rasterLine - FIRST_DISPLAY_LINE) % 8
+
+	// Get character from screen RAM (screen matrix)
+	// Screen RAM location is determined by memory pointers register
+	screenAddr := v.videoMatrix + charIndex
+	char := v.mem.Read(screenAddr)
+
+	// Get character color from color RAM ($D800-$DBFF)
+	colorAddr := 0xD800 + uint16(charIndex)
+	charColor := v.mem.Read(colorAddr)
+
+	// Get character data from character ROM/RAM
+	// Character memory location determined by memory pointers register
+	charData := v.mem.ReadChar(uint16(char)*8 + charLine)
+
+	// Render all 8 pixels for this character line
+	for bit := uint8(0); bit < 8; bit++ {
+		pixel := (charData >> (7 - bit)) & 1
+		if pixel == 1 {
+			v.displayBuffer[bufferIndex+int(bit)] = charColor
+		} else {
+			v.displayBuffer[bufferIndex+int(bit)] = v.registers[RegBgColor0] // Background color
+		}
+	}
+
+	for i := 0; i < 8; i++ {
+		spriteNum := uint8(i)
+		if v.sprites[spriteNum].enabled {
+			v.renderSpriteColumn(spriteNum)
+		}
+	}
+}
+
 func (v *VIC) getCurrentPixelIndex(rasterX uint16, rasterY uint16) int {
-	// Only calculate for visible area
-	if rasterY < 56 || rasterY > 255 {
-		return -1
-	}
+	pixelY := (int(rasterY) - FIRST_VISIBLE_LINE) * PAL_FULL_WIDTH
+	pixelX := (int(rasterX) - LEFT_BORDER_CYCLE_START) * 8
 
-	// Calculate Y position in pixels (relative to top of visible area)
-	pixelY := (rasterY - 56) * 320
-
-	// Convert rasterX cycle to pixel X
-	// Visible area starts at cycle 13
-	if rasterX < 13 || rasterX >= 53 { // 13 + 40 cycles = 53
-		return -1
-	}
-	pixelX := (rasterX - 13) * 8
-
-	return int(pixelY + pixelX)
+	return pixelY + pixelX
 }
 
 func (v *VIC) updateSprites() {
@@ -575,10 +711,7 @@ func (v *VIC) updateSprites() {
 }
 
 func (v *VIC) fetchSpriteData(spriteIndex uint8) {
-	// Each sprite needs 2 cycles for DMA
-	//spriteIndex := (v.rasterCycle - 15) / SPRITE_DMA_CYCLES
-
-	if spriteIndex < NUM_SPRITES && v.sprites[spriteIndex].enabled {
+	if v.sprites[spriteIndex].enabled {
 		// Get sprite data pointer from $07F8-$07FF
 		basePtr := SPRITE_POINTER_BASE + uint16(spriteIndex)
 		v.sprites[spriteIndex].dataPtr = v.mem.Read(basePtr)
@@ -832,11 +965,11 @@ func (v *VIC) ReadRegister(reg uint8) uint8 {
 	switch reg {
 	case RegScreenControl1:
 		// Ensure current raster line MSB is reflected in bit 7
-		return (v.registers[reg] & 0x7F) | uint8((v.rasterCounter&0x100)>>1)
+		return (v.registers[reg] & 0x7F) | uint8((v.rasterLine&0x100)>>1)
 
 	case RegRaster:
 		// Return current raster line (lower 8 bits)
-		return uint8(v.rasterCounter & 0xFF)
+		return uint8(v.rasterLine & 0xFF)
 
 	case RegSpriteCollision, RegSpriteBgCollision:
 		// Reading clears the register after returning its value
@@ -893,7 +1026,7 @@ func (v *VIC) IsBadLine() bool {
 }
 
 func (v *VIC) GetRasterPosition() (uint8, uint16) {
-	return v.rasterCycle, v.rasterCounter
+	return v.rasterCycle, v.rasterLine
 }
 
 // Memory bank selection bits in CIA2 Port A (0xDD00)

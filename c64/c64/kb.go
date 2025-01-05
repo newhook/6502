@@ -225,13 +225,13 @@ func (k *Keyboard) SimulateTextInput(text string) {
 	}
 }
 
-const pasteText = `
+const pasteText2 = `
 10 v=53248:pokev+21,1:poke 2040,192:fort=12288to12350:poket,255:next
 20 pokev+39,1
-25 x=40:y=50
+25 x=24:y=50
 30 pokev,x:pokev+1,y
 `
-const pasteText2 = `
+const pasteText = `
 10 v=53248:pokev+21,1:poke 2040,192:fort=12288to12350:poket,255:next
 20 pokev+39,1
 25 x=0:y=50

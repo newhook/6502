@@ -446,7 +446,7 @@ func (m *Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "l":
 			//loadAddr, programData, err := LoadProgramFromT64("/Users/matthew/6502/6502/c64emu/ch/CHOPLI-E.T64", 0)
-			loadAddr, programData, err := t64.LoadProgramFromT64("ch/CHOPLI-D.T64", 0)
+			loadAddr, programData, err := t64.LoadProgramFromT64("roms/CHOPLI-D.T64", 0)
 			if err != nil {
 				panic(err)
 				//return err
