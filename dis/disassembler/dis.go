@@ -6,18 +6,22 @@ import (
 	"strings"
 )
 
-const maxMemory = 0xffff
+const MaxMemory = 0xffff
 
 type Location struct {
-	PC           uint16
+	Address      uint16
 	Value        uint8
 	OperandBytes []byte
 	Inst         *Instruction
+	Label        string
 }
 
 func (l Location) instruction() string {
 	if l.Inst == nil {
-		return fmt.Sprintf("$%04X: db $%02X        ; Invalid opcode\n", l.PC, l.Value)
+		return fmt.Sprintf("$%04X: db $%02X ; Invalid opcode", l.Address, l.Value)
+	}
+	if l.Label != "" {
+		return fmt.Sprintf("%s %s", l.Inst.Name, l.Label)
 	}
 	operand := l.Inst.Mode.FormatOperand(l.OperandBytes)
 	if operand == "" {
@@ -27,7 +31,7 @@ func (l Location) instruction() string {
 	// Special case for relative addressing - update target address based on PC
 	if l.Inst.Mode == Relative {
 		offset := int8(l.OperandBytes[0])
-		target := l.PC + 2 + uint16(offset)
+		target := l.Address + 2 + uint16(offset)
 		return fmt.Sprintf("%s $%04X", l.Inst.Name, target)
 	}
 
@@ -57,7 +61,7 @@ func (l Location) String() string {
 		hexDump = fmt.Sprintf("%02X %02X %02X", l.Value, l.OperandBytes[0], l.OperandBytes[1])
 	}
 
-	return fmt.Sprintf("$%04X: %-8s  %s", l.PC, hexDump, l.instruction())
+	return fmt.Sprintf("$%04X: %-8s  %s", l.Address, hexDump, l.instruction())
 }
 
 // Decode takes an opcode and returns the corresponding instruction
@@ -68,11 +72,11 @@ func Decode(opcode byte) (Instruction, bool) {
 
 func DisassembleInstructions(memory cpu.MemoryBus) []Location {
 	pc := 0
-	endAddr := maxMemory
+	endAddr := MaxMemory
 
 	var rows []Location
 	for pc < endAddr {
-		loc := disassembleLocation(memory, pc)
+		loc := DisassembleLocation(memory, pc)
 		rows = append(rows, loc)
 		pc += loc.Size()
 	}
@@ -87,7 +91,7 @@ func DisassembleMemory(memory cpu.MemoryBus, startAddr int, length int) string {
 	endAddr := startAddr + length
 
 	for pc < endAddr {
-		loc := disassembleLocation(memory, pc)
+		loc := DisassembleLocation(memory, pc)
 		out.WriteString(loc.String())
 		out.WriteString("\n")
 		pc += loc.Size()
@@ -96,10 +100,39 @@ func DisassembleMemory(memory cpu.MemoryBus, startAddr int, length int) string {
 	return out.String()
 }
 
-func disassembleLocation(memory cpu.MemoryBus, pc int) Location {
+// DisassembleMemory disassembles a range of memory starting at the given address
+type Region struct {
+	Instructions []Location
+	Bytes        []byte
+	StartAddr    int
+	EndAddr      int
+}
+
+func DisassembleRegion(memory cpu.MemoryBus, startAddr int, instructions int) Region {
+	var rows []Location
+	pc := startAddr
+	for pc < MaxMemory && len(rows) < instructions {
+		loc := DisassembleLocation(memory, pc)
+		rows = append(rows, loc)
+		pc += loc.Size()
+	}
+	mem := make([]byte, pc-startAddr)
+	for i := 0; i < len(mem); i++ {
+		mem[i] = memory.Read(uint16(i))
+	}
+
+	return Region{
+		Instructions: rows,
+		Bytes:        mem,
+		StartAddr:    startAddr,
+		EndAddr:      pc,
+	}
+}
+
+func DisassembleLocation(memory cpu.MemoryBus, pc int) Location {
 	// Get opcode
 	opcode := memory.Read(uint16(pc))
-	l := Location{PC: uint16(pc), Value: opcode}
+	l := Location{Address: uint16(pc), Value: opcode}
 
 	// Decode instruction
 	inst, exists := instructionSet[opcode]
@@ -112,7 +145,7 @@ func disassembleLocation(memory cpu.MemoryBus, pc int) Location {
 	operandCount := inst.Mode.GetOperandBytes()
 
 	// Bounds check
-	if pc+operandCount >= maxMemory {
+	if pc+operandCount >= MaxMemory {
 		return l
 		//row := fmt.Sprintf("$%04X: db $%02X        ; Incomplete instruction\n", pc, opcode)
 		//return pc, row
@@ -133,5 +166,5 @@ func disassembleLocation(memory cpu.MemoryBus, pc int) Location {
 
 // DisassembleBytes is a convenience function for disassembling a slice of bytes
 func DisassembleBytes(bytes cpu.MemoryBus) string {
-	return DisassembleMemory(bytes, 0, maxMemory)
+	return DisassembleMemory(bytes, 0, MaxMemory)
 }

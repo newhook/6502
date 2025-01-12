@@ -3,8 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/newhook/6502/cpu"
+	"github.com/newhook/6502/c64/t64"
 	"github.com/newhook/6502/dis/disassembler"
+	"github.com/newhook/6502/dis/flow"
 	"os"
 	"strconv"
 	"strings"
@@ -23,6 +24,7 @@ func main() {
 	// Command line flags
 	inputFile := flag.String("i", "", "Input binary file")
 	startAddr := flag.String("a", "", "Start address")
+	traceFlow := flag.Bool("flow", false, "")
 	flag.Parse()
 
 	addrStr := *startAddr
@@ -35,10 +37,16 @@ func main() {
 		return
 	}
 
+	if *traceFlow {
+		if err := doflow(*inputFile, int(startAddrInt)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+		return
+	}
+
 	// Create and initialize CPU
 	memory := &Memory{}
-	c := cpu.NewCPU(memory)
-	len, err := LoadAndSetupBinary(c, memory, *inputFile, int(startAddrInt))
+	len, err := LoadAndSetupBinary(memory, *inputFile, int(startAddrInt))
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return
@@ -47,7 +55,54 @@ func main() {
 	fmt.Println(disassembler.DisassembleMemory(memory, int(startAddrInt), len))
 }
 
-func LoadAndSetupBinary(c *cpu.CPU, mem *Memory, filename string, startAddr int) (int, error) {
+func doflow(name string, startAddr int) error {
+	loadAddr, programData, err := t64.LoadProgramFromT64(name, 0)
+	if err != nil {
+		return err
+	}
+	memory := &Memory{}
+	for i, b := range programData {
+		memory.Write(loadAddr+uint16(i), b)
+	}
+
+	// Now copy the program data into the memory
+	//$0900-$4900 → $8000-$C000
+	src := uint16(0x900)
+	end := src + 16*1024
+	dst := uint16(0x8000)
+	for src < end {
+		memory.Write(dst, memory.Read(src))
+		src++
+		dst++
+	}
+
+	tracer := flow.NewFlowTracer(memory)
+	tracer.AddEntryPoint(uint16(startAddr))
+	instructions := tracer.TraceFlow()
+
+	var out strings.Builder
+	for _, loc := range instructions {
+		out.WriteString(loc.String())
+		out.WriteString("\n")
+	}
+
+	fmt.Print(out.String())
+	return nil
+}
+
+func LoadAndSetupBinary(mem *Memory, filename string, startAddr int) (int, error) {
+	if strings.HasSuffix(strings.ToLower(filename), ".t64") {
+		loadAddr, programData, err := t64.LoadProgramFromT64(filename, 0)
+		if err != nil {
+			return 0, err
+		}
+		for i, b := range programData {
+			mem.Write(loadAddr+uint16(i), b)
+		}
+		fmt.Printf("loaded %d bytes at $%04X\n", len(programData), loadAddr)
+		return len(programData), nil
+	}
+
 	// Read the binary file
 	data, err := os.ReadFile(filename)
 	if err != nil {
@@ -71,9 +126,6 @@ func LoadAndSetupBinary(c *cpu.CPU, mem *Memory, filename string, startAddr int)
 	// Set up IRQ vector at 0xFFFE-0xFFFF to point to 0xF5A4
 	mem[0xFFFE] = 0xA4 // Low byte
 	mem[0xFFFF] = 0xF5 // High byte
-
-	// Set the Program Counter to the reset vector location
-	c.PC = uint16(startAddr)
 
 	return len(data), nil
 }

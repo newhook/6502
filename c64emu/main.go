@@ -1,0 +1,79 @@
+package main
+
+import (
+	"log"
+	"log/slog"
+	"os"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/newhook/6502/c64/c64"
+	"github.com/newhook/6502/mon/monitor"
+)
+
+var runMonitor = false
+
+func main() {
+	computer, err := c64.NewC64()
+	if err != nil {
+		log.Fatal(err)
+	}
+	do := func() error {
+		mem := computer.Memory
+		// Load ROMs
+		basicROM, err := os.ReadFile("basic-901226-01.bin")
+		if err != nil {
+			return err
+		}
+		kernalROM, err := os.ReadFile("kernal-901227-03.bin")
+		if err != nil {
+			return err
+		}
+		charROM, err := os.ReadFile("chargen-901225-01.bin")
+		if err != nil {
+			return err
+		}
+		if err := mem.LoadROM(basicROM, "basic"); err != nil {
+			return err
+		}
+		if err := mem.LoadROM(kernalROM, "kernal"); err != nil {
+			return err
+		}
+		if err := mem.LoadROM(charROM, "char"); err != nil {
+			return err
+		}
+
+		mem.Map()
+
+		// Initialize CPU registers
+		// Reset vector
+		computer.CPU.PC = uint16(mem.Read(0xFFFC)) | uint16(mem.Read(0xFFFD))<<8
+
+		if runMonitor {
+			m := monitor.NewMonitor(computer, computer.CPU, computer.Memory, computer.CIA1, computer.CIA2, computer.VIC)
+			logger := slog.New(slog.NewTextHandler(m, nil))
+			slog.SetDefault(logger)
+			p := tea.NewProgram(m)
+			if _, err := p.Run(); err != nil {
+				return err
+			}
+			return nil
+		}
+
+		// Main emulation loop
+		for computer.IsRunning() {
+			computer.Step()
+			if err := computer.CPU.Error(); err != nil {
+				panic(err)
+			}
+
+			// Optional: Add delay to match real C64 speed
+			//if computer.Timing.ShouldDelay() {
+			//	time.Sleep(c64.Timing.GetDelay())
+			//}
+		}
+		return nil
+	}
+	if err := do(); err != nil {
+		log.Fatal("error", err)
+	}
+}

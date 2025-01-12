@@ -1,0 +1,77 @@
+// Package cia provides an interface to a 6526 Complex Interface Adapter (CIA)
+package cia
+
+// RegisterAddress represents the offset from CIA base address
+type RegisterAddress uint8
+
+// Register addresses for CIA chip
+const (
+	PRA       RegisterAddress = 0x00 // Peripheral Data Register A
+	PRB       RegisterAddress = 0x01 // Peripheral Data Register B
+	DDRA      RegisterAddress = 0x02 // Data Direction Register A
+	DDRB      RegisterAddress = 0x03 // Data Direction Register B
+	TA_LO     RegisterAddress = 0x04 // Timer A Low Byte
+	TA_HI     RegisterAddress = 0x05 // Timer A High Byte
+	TB_LO     RegisterAddress = 0x06 // Timer B Low Byte
+	TB_HI     RegisterAddress = 0x07 // Timer B High Byte
+	TOD_10THS RegisterAddress = 0x08 // Time of Day Tenths
+	TOD_SEC   RegisterAddress = 0x09 // Time of Day Seconds
+	TOD_MIN   RegisterAddress = 0x0A // Time of Day Minutes
+	TOD_HR    RegisterAddress = 0x0B // Time of Day Hours
+	SDR       RegisterAddress = 0x0C // Serial Data Register
+	ICR       RegisterAddress = 0x0D // Interrupt Control Register
+	CRA       RegisterAddress = 0x0E // Control Register A
+	CRB       RegisterAddress = 0x0F // Control Register B
+)
+
+// Control Register A bit masks
+const (
+	CRA_START   uint8 = 0x01 // Start Timer A (1 = Start, 0 = Stop)
+	CRA_PBON    uint8 = 0x02 // Timer A output on PB6 (1 = Output, 0 = No output)
+	CRA_OUTMODE uint8 = 0x04 // Timer A output mode (1 = Toggle, 0 = Pulse)
+	CRA_RUNMODE uint8 = 0x08 // Timer A run mode (1 = One-shot, 0 = Continuous)
+	CRA_FORCE   uint8 = 0x10 // Force Timer A load (1 = Force load)
+	CRA_INMODE  uint8 = 0x20 // Timer A input mode (1 = CNT, 0 = Clock)
+	CRA_SPMODE  uint8 = 0x40 // Serial Port mode (1 = Output, 0 = Input)
+	CRA_TODIN   uint8 = 0x80 // Time of Day frequency (1 = 50Hz, 0 = 60Hz)
+)
+
+// Control Register B bit masks
+const (
+	CRB_START   uint8 = 0x01 // Start Timer B (1 = Start, 0 = Stop)
+	CRB_PBON    uint8 = 0x02 // Timer B output on PB7 (1 = Output, 0 = No output)
+	CRB_OUTMODE uint8 = 0x04 // Timer B output mode (1 = Toggle, 0 = Pulse)
+	CRB_RUNMODE uint8 = 0x08 // Timer B run mode (1 = One-shot, 0 = Continuous)
+	CRB_FORCE   uint8 = 0x10 // Force Timer B load (1 = Force load)
+	CRB_INMODE  uint8 = 0x60 // Timer B input mode (00 = Clock, 01 = CNT, 10 = Timer A underflow, 11 = Timer A underflow with CNT)
+	CRB_ALARM   uint8 = 0x80 // Time of Day alarm (1 = Alarm, 0 = Clock)
+)
+
+// Interrupt Control Register bit masks
+const (
+	ICR_TA   uint8 = 0x01 // Timer A interrupt
+	ICR_TB   uint8 = 0x02 // Timer B interrupt
+	ICR_TOD  uint8 = 0x04 // Time of Day alarm interrupt
+	ICR_SDR  uint8 = 0x08 // Serial Port interrupt
+	ICR_FLAG uint8 = 0x10 // FLAG line interrupt
+	ICR_SET  uint8 = 0x80 // Set/Clear flag (1 = Set, 0 = Clear)
+)
+
+// CIAEvent represents events that can occur during CIA update
+type CIAEvent struct {
+	IRQ bool // Interrupt request occurred
+	NMI bool // Non-maskable interrupt occurred
+}
+
+// CIA defines the interface for a 6526 Complex Interface Adapter
+type CIA interface {
+	// Register access
+	ReadRegister(reg RegisterAddress) uint8
+	WriteRegister(reg RegisterAddress, val uint8)
+
+	// System update
+	Update(cycles uint8) *CIAEvent
+
+	// Interrupt status
+	IsIRQActive() bool
+}

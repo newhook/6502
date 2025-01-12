@@ -1,0 +1,14 @@
+Change the display to take over the full window.
+Change the styling of the status bar to be yellow.
+Make the output two columns.
+Column 1 is CPU state and disassembly.
+Column 2 stack and member.
+Under both columns is a debug log of system output.
+
+
+
+I'm writing a c64 emulator with golang. I want to modify this monitor to:
+* Only disassemble at the current memory location forward 100 instructions.
+* Not allow moving past the start of the disassembly.
+* Add a new command to disassemble from the current location.
+* Refresh the disassembly after each step.

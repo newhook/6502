@@ -18,6 +18,8 @@ type Assembler struct {
 	pc          uint16
 	output      []byte
 	errors      []string
+	minOutput   int
+	maxOutput   int
 }
 
 // NewAssembler creates a new instance of our assembler
@@ -33,7 +35,9 @@ func NewAssembler() *Assembler {
 func (a *Assembler) Assemble(source string) error {
 	a.currentPass = 1
 	a.pc = 0
-	a.output = make([]byte, 0)
+	a.output = make([]byte, 0xffff) // 64K of data.
+	a.minOutput = -1
+	a.maxOutput = -1
 
 	// First pass: collect symbols
 	lexer := NewLexer(source)
@@ -153,29 +157,33 @@ func (a *Assembler) generateCode(line *Line) error {
 	}
 
 	// Output opcode
-	a.output = append(a.output, mode.Opcode)
+	a.emitOutput(a.pc, mode.Opcode)
 
 	if mode.AddressMode == Relative {
-		// Calculate relative offset
-		// PC will be at next instruction when branch is executed
-		nextPC := a.pc + 2
-		offset := int16(line.Value) - int16(nextPC)
+		var offset int16
+		if line.Instruction == "BRK" {
+			offset = 0xEA // NOP
+		} else {
+			// Calculate relative offset
+			// PC will be at next instruction when branch is executed
+			nextPC := a.pc + 2
+			offset = int16(line.Value) - int16(nextPC)
 
-		// Check if branch is in range (-128 to +127)
-		if offset < -128 || offset > 127 {
-			return fmt.Errorf("branch target out of range (%d bytes)", offset)
+			// Check if branch is in range (-128 to +127)
+			if offset < -128 || offset > 127 {
+				return fmt.Errorf("branch target out of range (%d bytes)", offset)
+			}
 		}
-
 		// Output the offset.
-		a.output = append(a.output, uint8(offset))
+		a.emitOutput(a.pc+1, uint8(offset))
 	} else {
 		// Output operand bytes
 		switch mode.Size {
 		case 2:
-			a.output = append(a.output, uint8(line.Value))
+			a.emitOutput(a.pc+1, uint8(line.Value))
 		case 3:
-			a.output = append(a.output, uint8(line.Value))
-			a.output = append(a.output, uint8(line.Value>>8))
+			a.emitOutput(a.pc+1, uint8(line.Value))
+			a.emitOutput(a.pc+2, uint8(line.Value>>8))
 		}
 	}
 
@@ -183,6 +191,18 @@ func (a *Assembler) generateCode(line *Line) error {
 	return nil
 }
 
+func (a *Assembler) emitOutput(loc uint16, data uint8) {
+	if a.minOutput == -1 || loc < uint16(a.minOutput) {
+		a.minOutput = int(loc)
+	}
+	if a.maxOutput == -1 || loc > uint16(a.maxOutput) {
+		a.maxOutput = int(loc)
+	}
+	a.output[loc] = data
+}
+
 func (a *Assembler) GetOutput() []byte {
-	return a.output
+	code := make([]byte, a.maxOutput+1-a.minOutput)
+	copy(code, a.output[a.minOutput:a.maxOutput+1])
+	return code
 }

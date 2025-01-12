@@ -1,18 +1,16 @@
-package monitor
+package main
 
 import (
 	"bytes"
 	"fmt"
-	"github.com/newhook/6502/c64/t64"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/newhook/6502/c64/cia"
-	"github.com/newhook/6502/c64/vic"
 	"github.com/newhook/6502/cpu"
 	"github.com/newhook/6502/dis/disassembler"
 )
@@ -49,9 +47,7 @@ type Monitor struct {
 	stepper          Stepper
 	mem              cpu.MemoryBus
 	cpu              *cpu.CPU
-	cia1             *cia.CIA
-	cia2             *cia.CIA
-	vic              *vic.VIC
+	pia              *PIA
 	paused           bool
 	width            int
 	height           int
@@ -61,8 +57,9 @@ type Monitor struct {
 
 	lastState  CPUState  // Previous CPU state for change detection
 	lastMemory [64]uint8 // Only track visible memory (8 rows * 8 bytes)
-	lastCIA1   [16]uint8 // Last state of CIA1 registers
-	lastCIA2   [16]uint8 // Last state of CIA2 registers
+	lastPIA    [4]uint8  // Last state of PIA registers
+
+	display string
 
 	memoryAddress uint16 // Start address for memory view
 	activePane    string // "disasm", "memory"
@@ -77,6 +74,9 @@ type Monitor struct {
 	logBufferSize   int      // Maximum number of lines in the buffer
 	logScrollIndex  int      // Current scroll position in the buffer
 	visibleLogLines int      // Number of lines visible in the output window
+
+	focusedPane string   // Current focused pane
+	paneOrder   []string // Order of panes for tab cycling
 }
 
 // Define some basic styles
@@ -86,9 +86,22 @@ var (
 	special   = lipgloss.AdaptiveColor{Light: "#43BF6D", Dark: "#73F59F"}
 	changed   = lipgloss.AdaptiveColor{Light: "#FF6B6B", Dark: "#FF6B6B"}
 
-	leftColumnWidth   = 50 // Fixed width for CPU state and disassembly
+	leftColumnWidth   = 42 // Fixed width for CPU state and disassembly
 	middleColumnWidth = 50 // Fixed width for stack and memory
 	rightColumnWidth  = 50 // Fixed width for cia1, cia2, and vic-ii
+
+	focusedBorder = lipgloss.Border{
+		Top:         "─",
+		Bottom:      "─",
+		Left:        "│",
+		Right:       "│",
+		TopLeft:     "╭",
+		TopRight:    "╮",
+		BottomLeft:  "╰",
+		BottomRight: "╯",
+	}
+
+	unfocusedBorder = lipgloss.RoundedBorder()
 
 	titleStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFF00")).
@@ -119,14 +132,7 @@ var (
 			BorderStyle(lipgloss.RoundedBorder()).
 			BorderForeground(highlight).
 			Width(leftColumnWidth).
-			Height(4).
-			PaddingLeft(1).
-			PaddingRight(1)
-
-	disasmStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(highlight).
-			Width(leftColumnWidth).
+			Height(5).
 			PaddingLeft(1).
 			PaddingRight(1)
 
@@ -138,41 +144,76 @@ var (
 			PaddingLeft(1).
 			PaddingRight(1)
 
-	// Add new style for memory panel
+	disasmStyle = lipgloss.NewStyle().
+			BorderForeground(highlight).
+			Width(middleColumnWidth).
+			Height(nInstructionRows + 1).
+			PaddingLeft(1).
+			PaddingRight(1)
+
 	memoryStyle = lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
 			BorderForeground(special).
 			Width(middleColumnWidth).
 			PaddingLeft(1).
 			PaddingRight(1)
 
-	cia1Style = lipgloss.NewStyle().
+	piaStyle = lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
 			BorderForeground(special).
 			Width(rightColumnWidth).
 			PaddingLeft(1).
 			PaddingRight(1)
 
-	cia2Style = lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
+	terminalStyle = lipgloss.NewStyle().
 			BorderForeground(special).
-			Width(rightColumnWidth).
+			Width(leftColumnWidth).
+			Height(24).
 			PaddingLeft(1).
 			PaddingRight(1)
 
-	vicStyle = lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(special).
-			Padding(1).
-			Width(rightColumnWidth)
-
+	// Update existing styles to be functions that take a focused parameter
 	outputStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(special).
 			Height(5).
 			PaddingLeft(1).
 			PaddingRight(1)
+
+	// Update existing styles to be functions that take a focused parameter
 )
+
+func getMemoryStyle(focused bool) lipgloss.Style {
+	if focused {
+		return memoryStyle.
+			BorderStyle(focusedBorder).
+			BorderForeground(highlight)
+	}
+	return memoryStyle.
+		BorderStyle(unfocusedBorder).
+		BorderForeground(special)
+}
+
+func getTerminalStyle(focused bool) lipgloss.Style {
+	if focused {
+		return terminalStyle.
+			BorderStyle(focusedBorder).
+			BorderForeground(highlight)
+	}
+	return terminalStyle.
+		BorderStyle(unfocusedBorder).
+		BorderForeground(special)
+}
+
+func getDisasmStyle(focused bool) lipgloss.Style {
+	if focused {
+		return disasmStyle.
+			BorderStyle(focusedBorder).
+			BorderForeground(highlight)
+	}
+	return disasmStyle.
+		BorderStyle(unfocusedBorder).
+		BorderForeground(special)
+}
 
 type Stepper interface {
 	Step() uint8
@@ -184,7 +225,7 @@ const (
 )
 
 // Initialize the monitor
-func NewMonitor(stepper Stepper, cpu *cpu.CPU, mem cpu.MemoryBus, cia1 *cia.CIA, cia2 *cia.CIA, vic *vic.VIC) *Monitor {
+func NewMonitor(stepper Stepper, cpu *cpu.CPU, mem cpu.MemoryBus, pia *PIA) *Monitor {
 	ti := textinput.New()
 	ti.Placeholder = "Enter hex address (e.g. FF00)"
 	ti.CharLimit = 4
@@ -194,9 +235,7 @@ func NewMonitor(stepper Stepper, cpu *cpu.CPU, mem cpu.MemoryBus, cia1 *cia.CIA,
 		stepper:         stepper,
 		mem:             mem,
 		cpu:             cpu,
-		cia1:            cia1,
-		cia2:            cia2,
-		vic:             vic,
+		pia:             pia,
 		paused:          true,
 		region:          disassembler.DisassembleRegion(mem, 0, nInstructions),
 		memoryAddress:   0,
@@ -207,6 +246,19 @@ func NewMonitor(stepper Stepper, cpu *cpu.CPU, mem cpu.MemoryBus, cia1 *cia.CIA,
 		logBufferSize:   100, // Maximum of 100 log lines
 		logScrollIndex:  0,
 		visibleLogLines: 5, // Assume 5 lines fit in the output window; adjust as needed
+		display:         "0123456789012345678901234567890123456789",
+
+		focusedPane: "terminal", // Start with terminal focused
+		paneOrder:   []string{"terminal", "disasm", "memory"},
+	}
+	pia.OnDisplay = func(char byte) {
+		// Append the new character to display
+		//char := byte(char)
+		if char == 0x0D { // Carriage return
+			m.display += "\n"
+		} else {
+			m.display += string(char)
+		}
 	}
 	m.relocate(0)
 	return m
@@ -371,7 +423,7 @@ func (m *Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.captureState()
 
 		// Execute step until we hit a breakpoint
-		for cycles := 0; cycles < 10_000; {
+		for cycles := 0; cycles < 1; {
 			cycles += int(m.stepper.Step())
 			if err := m.cpu.Error(); err != nil {
 				m.Write([]byte(fmt.Sprintf("Error: %v", err)))
@@ -443,142 +495,161 @@ func (m *Monitor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-		switch msg.String() {
-		case "l":
-			//loadAddr, programData, err := LoadProgramFromT64("/Users/matthew/6502/6502/c64emu/ch/CHOPLI-E.T64", 0)
-			loadAddr, programData, err := t64.LoadProgramFromT64("roms/CHOPLI-D.T64", 0)
-			if err != nil {
-				panic(err)
-				//return err
-			}
-			for i, b := range programData {
-				m.mem.Write(loadAddr+uint16(i), b)
-			}
-			m.Write([]byte(fmt.Sprintf("loaded at %d bytes at address %x", len(programData), loadAddr)))
+		if m.focusedPane == "terminal" {
+			switch msg.Type {
+			case tea.KeyTab:
+				m.cycleFocus()
+				return m, nil
 
-		case "G":
-			m.showingGoto = true
-			m.gotoDis = true
-			m.gotoInput.Focus()
-			return m, textinput.Blink
+			case tea.KeyRunes:
+				ascii := byte(unicode.ToUpper(msg.Runes[0]))
+				// Apple 1 only accepted uppercase ASCII
+				// Convert to uppercase and ensure it's in ASCII range
 
-		case "c":
-			m.paused = false
-			return m, doContinue()
-
-		case "g":
-			m.showingGoto = true
-			m.gotoInput.Focus()
-			return m, textinput.Blink
-
-		case "r":
-			// Refresh the screen by clearing and re-rendering
-			return m, tea.Batch(tea.ClearScreen)
-
-		case "q", "ctrl+c":
-			return m, tea.Quit
-
-		case "s":
-			// Single step
-			if m.paused {
-				// Store current state before step
-				m.lastState = CPUState{
-					A:  m.cpu.A,
-					X:  m.cpu.X,
-					Y:  m.cpu.Y,
-					PC: m.cpu.PC,
-					SP: m.cpu.SP,
-					P:  m.cpu.P,
+				// Special key translations
+				switch ascii {
+				case '\b', 127:
+					ascii = 0x5F // Backspace/Delete -> Underscore (Apple 1's delete char)
+				case '\t':
+					ascii = 0x09 // Tab
+				case 0x1B:
+					ascii = 0x1B // Escape
 				}
-				m.captureState()
-				m.stepper.Step()
-				if err := m.cpu.Error(); err != nil {
-					m.Write([]byte(fmt.Sprintf("Error: %v", err)))
-					m.paused = true
-					break
+
+				// Only process printable ASCII chars and control chars
+				if ascii <= 0x7F {
+					m.pia.KeyPress(ascii)
 				}
-				m.relocate(m.cpu.PC)
+
+			case tea.KeySpace:
+				m.pia.KeyPress(' ')
+
+			case tea.KeyEnter:
+				m.pia.KeyPress(0x0D) // CR
 			}
+		} else {
+			switch msg.String() {
+			case "G":
+				m.showingGoto = true
+				m.gotoDis = true
+				m.gotoInput.Focus()
+				return m, textinput.Blink
 
-		case "b":
-			// Toggle breakpoint at selected address
-			addr := m.region.Instructions[m.selectedLocation].Address
-			if m.breakpoints[addr] {
-				delete(m.breakpoints, addr)
-			} else {
-				m.breakpoints[addr] = true
-			}
+			case "c":
+				m.paused = false
+				return m, doContinue()
 
-		case "n":
-			m.nextTo = m.region.Instructions[m.selectedLocation+1].Address
-			m.paused = false
-			return m, doContinue()
+			case "g":
+				m.showingGoto = true
+				m.gotoInput.Focus()
+				return m, textinput.Blink
 
-		case "p":
-			m.paused = !m.paused
+			case "r":
+				// Refresh the screen by clearing and re-rendering
+				return m, tea.Batch(tea.ClearScreen)
 
-		case "tab":
-			if m.activePane == "disasm" {
-				m.activePane = "memory"
-			} else {
-				m.activePane = "disasm"
-			}
+			case "q", "ctrl+c":
+				return m, tea.Quit
 
-		case "up":
-			if m.activePane == "disasm" {
-				m.selectedLocation--
-				if m.selectedLocation < 0 {
-					m.selectedLocation = 0
+			case "s":
+				// Single step
+				if m.paused {
+					// Store current state before step
+					m.lastState = CPUState{
+						A:  m.cpu.A,
+						X:  m.cpu.X,
+						Y:  m.cpu.Y,
+						PC: m.cpu.PC,
+						SP: m.cpu.SP,
+						P:  m.cpu.P,
+					}
+					m.captureState()
+					m.stepper.Step()
+					if err := m.cpu.Error(); err != nil {
+						m.Write([]byte(fmt.Sprintf("Error: %v", err)))
+						m.paused = true
+						break
+					}
+					m.relocate(m.cpu.PC)
 				}
-			} else {
-				if m.memoryAddress >= 8 {
-					m.memoryAddress -= 8
-					m.captureMemoryState() // Capture state for new memory region
-				}
-			}
 
-		case "down":
-			if m.activePane == "disasm" {
-				if m.selectedLocation < len(m.region.Instructions)-1 {
-					m.selectedLocation++
-				}
-			} else {
-				if m.memoryAddress <= 0xFFF8 {
-					m.memoryAddress += 8
-					m.captureMemoryState() // Capture state for new memory region
-				}
-			}
-
-		case "pgup":
-			if m.activePane == "disasm" {
-				m.selectedLocation -= nInstructionRows
-				if m.selectedLocation < 0 {
-					m.selectedLocation = 0
-				}
-			} else if m.activePane == "memory" {
-				// Move memory view up by 64 bytes (8 rows)
-				if m.memoryAddress >= 64 {
-					m.memoryAddress -= 64
+			case "b":
+				// Toggle breakpoint at selected address
+				addr := m.region.Instructions[m.selectedLocation].Address
+				if m.breakpoints[addr] {
+					delete(m.breakpoints, addr)
 				} else {
-					m.memoryAddress = 0
+					m.breakpoints[addr] = true
 				}
-				m.captureMemoryState()
-			}
 
-		case "pgdown":
-			if m.activePane == "disasm" {
-				m.selectedLocation += nInstructionRows
-				if m.selectedLocation > len(m.region.Instructions) {
-					m.selectedLocation = len(m.region.Instructions) - 1
-				}
-			} else if m.activePane == "memory" {
-				// Move memory view down by 64 bytes (8 rows)
-				if m.memoryAddress <= 0xFFC0 { // Ensure we don't overflow
-					m.memoryAddress += 64
+			case "n":
+				m.nextTo = m.region.Instructions[m.selectedLocation+1].Address
+				m.paused = false
+				return m, doContinue()
+
+			case "p":
+				m.paused = !m.paused
+
+			case "tab":
+				m.cycleFocus()
+				return m, nil
+
+			case "up":
+				if m.activePane == "disasm" {
+					m.selectedLocation--
+					if m.selectedLocation < 0 {
+						m.selectedLocation = 0
+					}
 				} else {
-					m.memoryAddress = 0xFFC0
+					if m.memoryAddress >= 8 {
+						m.memoryAddress -= 8
+						m.captureMemoryState() // Capture state for new memory region
+					}
 				}
-				m.captureMemoryState()
+
+			case "down":
+				if m.activePane == "disasm" {
+					if m.selectedLocation < len(m.region.Instructions)-1 {
+						m.selectedLocation++
+					}
+				} else {
+					if m.memoryAddress <= 0xFFF8 {
+						m.memoryAddress += 8
+						m.captureMemoryState() // Capture state for new memory region
+					}
+				}
+
+			case "pgup":
+				if m.activePane == "disasm" {
+					m.selectedLocation -= nInstructionRows
+					if m.selectedLocation < 0 {
+						m.selectedLocation = 0
+					}
+				} else if m.activePane == "memory" {
+					// Move memory view up by 64 bytes (8 rows)
+					if m.memoryAddress >= 64 {
+						m.memoryAddress -= 64
+					} else {
+						m.memoryAddress = 0
+					}
+					m.captureMemoryState()
+				}
+
+			case "pgdown":
+				if m.activePane == "disasm" {
+					m.selectedLocation += nInstructionRows
+					if m.selectedLocation > len(m.region.Instructions) {
+						m.selectedLocation = len(m.region.Instructions) - 1
+					}
+				} else if m.activePane == "memory" {
+					// Move memory view down by 64 bytes (8 rows)
+					if m.memoryAddress <= 0xFFC0 { // Ensure we don't overflow
+						m.memoryAddress += 64
+					} else {
+						m.memoryAddress = 0xFFC0
+					}
+					m.captureMemoryState()
+				}
 			}
 		}
 
@@ -734,150 +805,65 @@ func (m Monitor) formatStack() string {
 	return result.String()
 }
 
-/*
-func (m Monitor) formatStack() string {
-	var result strings.Builder
-	for i := uint16(0xFF); i >= uint16(m.cpu.SP); i-- {
-		result.WriteString(fmt.Sprintf("$%02X: %02X\n", i, m.mem.Read(0x100+i)))
+func (m Monitor) formatPIA(c *PIA, lastState [4]uint8) string {
+	var piaDetails strings.Builder
+	line := fmt.Sprintf("%-8s: $%02X", "KBD", c.kbd)
+	if c.kbd != lastState[0] {
+		line = changedStyle.Render(line)
 	}
-	return result.String()
+	piaDetails.WriteString(line + "\n")
+	line = fmt.Sprintf("%-8s: $%02X", "KBDCR", c.kbdcr)
+	if c.kbd != lastState[1] {
+		line = changedStyle.Render(line)
+	}
+	piaDetails.WriteString(line + "\n")
+	line = fmt.Sprintf("%-8s: $%02X", "DSP", c.dsp)
+	if c.kbd != lastState[2] {
+		line = changedStyle.Render(line)
+	}
+	piaDetails.WriteString(line + "\n")
+	line = fmt.Sprintf("%-8s: $%02X", "DSPCR", c.dspcr)
+	if c.kbd != lastState[3] {
+		line = changedStyle.Render(line)
+	}
+	piaDetails.WriteString(line + "\n")
+	return piaDetails.String()
 }
 
-*/
-
-func formatBitfield(value uint8, bitNames map[uint8]string) string {
-	var result strings.Builder
-	for bit, name := range bitNames {
-		if value&bit != 0 {
-			result.WriteString(fmt.Sprintf("%s: 1\n", name))
-		} else {
-			result.WriteString(fmt.Sprintf("%s: 0\n", name))
+func (m *Monitor) cycleFocus() {
+	for i, pane := range m.paneOrder {
+		if pane == m.focusedPane {
+			m.focusedPane = m.paneOrder[(i+1)%len(m.paneOrder)]
+			return
 		}
 	}
-	return result.String()
-}
-
-func (m Monitor) formatCIA(c *cia.CIA, lastState [16]uint8) string {
-	// Right column: CIA1, CIA2, and VIC-II
-	registerNames := map[int]string{
-		cia.PRA:       "PRA",
-		cia.PRB:       "PRB",
-		cia.DDRA:      "DDRA",
-		cia.DDRB:      "DDRB",
-		cia.TA_LO:     "TA_LO",
-		cia.TA_HI:     "TA_HI",
-		cia.TB_LO:     "TB_LO",
-		cia.TB_HI:     "TB_HI",
-		cia.TOD_10THS: "TOD_10",
-		cia.TOD_SEC:   "TOD_SEC",
-		cia.TOD_MIN:   "TOD_MIN",
-		cia.TOD_HR:    "TOD_HR",
-		cia.SDR:       "SDR",
-		cia.ICR:       "ICR",
-		cia.CRA:       "CRA",
-		cia.CRB:       "CRB",
-	}
-
-	var ciaDetails strings.Builder
-	for i := 0; i < len(c.Registers); i += 3 {
-		// Get the first register
-		name1, reg1 := registerNames[i], c.Registers[i]
-		line := fmt.Sprintf("%-8s: $%02X", name1, reg1)
-		if reg1 != lastState[i] {
-			line = changedStyle.Render(line)
-		}
-
-		// Check if there's a second register
-		if i+1 < len(c.Registers) {
-			name2, reg2 := registerNames[i+1], c.Registers[i+1]
-			part := fmt.Sprintf("    %-8s: $%02X", name2, reg2)
-			if reg2 != lastState[i+1] {
-				part = changedStyle.Render(part)
-			}
-			line += part
-		}
-
-		if i+2 < len(c.Registers) {
-			name3, reg3 := registerNames[i+2], c.Registers[i+2]
-			part := fmt.Sprintf("    %-8s: $%02X", name3, reg3)
-			if reg3 != lastState[i+2] {
-				part = changedStyle.Render(part)
-			}
-			line += part
-		}
-
-		ciaDetails.WriteString(line + "\n")
-	}
-
-	// Add timer details
-	ciaDetails.WriteString(fmt.Sprintf("\nTimer A: %04X Latch: %04X\n", c.TimerA, c.TimerALatch))
-	ciaDetails.WriteString(fmt.Sprintf("Timer B: %04X Latch: %04X\n", c.TimerB, c.TimerBLatch))
-
-	// Add bitfield details for ICR, CRA, and CRB
-	if false {
-		ciaDetails.WriteString("\nICR:\n")
-		ciaDetails.WriteString(formatBitfield(c.Registers[cia.ICR], map[uint8]string{
-			cia.ICR_TA:   "Timer A Interrupt",
-			cia.ICR_TB:   "Timer B Interrupt",
-			cia.ICR_TOD:  "TOD Alarm Interrupt",
-			cia.ICR_SDR:  "Serial Port Interrupt",
-			cia.ICR_FLAG: "FLAG Line Interrupt",
-			cia.ICR_SET:  "Set/Clear Flag",
-		}))
-
-		ciaDetails.WriteString("\nCRA:\n")
-		ciaDetails.WriteString(formatBitfield(c.Registers[cia.CRA], map[uint8]string{
-			cia.CRA_START:   "Start Timer A",
-			cia.CRA_PBON:    "Timer A Output on PB6",
-			cia.CRA_OUTMODE: "Timer A Output Mode",
-			cia.CRA_RUNMODE: "Timer A Run Mode",
-			cia.CRA_FORCE:   "Force Timer A Load",
-			cia.CRA_INMODE:  "Timer A Input Mode",
-			cia.CRA_SPMODE:  "Serial Port Mode",
-			cia.CRA_TODIN:   "TOD Frequency",
-		}))
-
-		ciaDetails.WriteString("\nCRB:\n")
-		ciaDetails.WriteString(formatBitfield(c.Registers[cia.CRB], map[uint8]string{
-			cia.CRB_START:   "Start Timer B",
-			cia.CRB_PBON:    "Timer B Output on PB7",
-			cia.CRB_OUTMODE: "Timer B Output Mode",
-			cia.CRB_RUNMODE: "Timer B Run Mode",
-			cia.CRB_FORCE:   "Force Timer B Load",
-			cia.CRB_INMODE:  "Timer B Input Mode",
-			cia.CRB_ALARM:   "TOD Alarm",
-		}))
-	}
-	return ciaDetails.String()
 }
 
 func (m Monitor) View() string {
 	// Left column: CPU state and disassembly
 	leftColumn := lipgloss.JoinVertical(
 		lipgloss.Left,
+		labelStyle.Render("Terminal"),
+		getTerminalStyle(m.focusedPane == "terminal").Render(m.formatTerminal()),
 		labelStyle.Render("CPU"),
 		cpuStyle.Render(m.formatCPU()),
-		labelStyle.Render("Disassembly"),
-		disasmStyle.Render(m.disassemble()),
 	)
 
 	// Middle column: Stack and memory
 	middleColumn := lipgloss.JoinVertical(
 		lipgloss.Left,
-		labelStyle.Render("Stack"),
-		stackStyle.Render(m.formatStack()),
+		labelStyle.Render("Disassembly"),
+		getDisasmStyle(m.focusedPane == "disasm").Render(m.disassemble()),
 		labelStyle.Render("Memory (↑↓ to scroll)"),
-		memoryStyle.Render(m.formatMemory()),
+		getMemoryStyle(m.focusedPane == "memory").Render(m.formatMemory()),
 	)
 
 	rightColumn := lipgloss.JoinVertical(
 		lipgloss.Left,
-		labelStyle.Render("CIA1"),
-		cia1Style.Render(m.formatCIA(m.cia1, m.lastCIA1)),
-		labelStyle.Render("CIA2"),
-		cia2Style.Render(m.formatCIA(m.cia2, m.lastCIA2)),
-		labelStyle.Render("VIC-II"),
-		vicStyle.Render("VIC-II\n\n<vic-ii details here>"),
+		labelStyle.Render("Stack"),
+		stackStyle.Render(m.formatStack()),
+		labelStyle.Render("PIA"),
+		piaStyle.Render(m.formatPIA(m.pia, m.lastPIA)),
 	)
 
 	// Help section at the bottom
@@ -936,6 +922,12 @@ func (m Monitor) View() string {
 }
 
 func (m *Monitor) captureCIAState() {
-	copy(m.lastCIA1[:], m.cia1.Registers[:])
-	copy(m.lastCIA2[:], m.cia2.Registers[:])
+	m.lastPIA[0] = m.pia.kbd
+	m.lastPIA[1] = m.pia.kbdcr
+	m.lastPIA[2] = m.pia.dsp
+	m.lastPIA[3] = m.pia.dspcr
+}
+
+func (m *Monitor) formatTerminal() string {
+	return m.display
 }
