@@ -3,11 +3,11 @@ package main
 import (
 	"fmt"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eiannone/keyboard"
 	"github.com/newhook/6502/cpu"
 	"log"
+	"log/slog"
 	"os"
-	"time"
-	"unicode"
 )
 
 var runMonitor = false
@@ -96,6 +96,9 @@ func NewPIA(displayCallback func(char byte)) *PIA {
 func (p *PIA) ReadRegister(addr uint8) uint8 {
 	switch addr {
 	case 0x0:
+		if p.kbd != 0 {
+			p.kbdcr &= 0x7F // Clear keyboard strobe
+		}
 		return p.kbd
 	case 0x1:
 		return p.kbdcr
@@ -112,13 +115,14 @@ func (p *PIA) WriteRegister(addr uint8, val uint8) {
 	switch addr {
 	case 0x1:
 		// Clear keyboard strobe
-		p.kbd &= 0x7F
+		p.kbdcr &= 0x7F
 	case 0x2:
 		// Write to display
 		if p.dspcr&0x80 != 0 { // Check if display is ready
 			p.dsp = val
 			if val&0x80 != 0 { // Only display if bit 7 is set
 				p.OnDisplay(val & 0x7F) // Strip bit 7 for ASCII
+				p.dsp &= 0x7F
 			}
 		}
 	}
@@ -127,6 +131,7 @@ func (p *PIA) WriteRegister(addr uint8, val uint8) {
 // Called when a key is pressed on the emulated keyboard
 func (p *PIA) KeyPress(key byte) {
 	p.kbd = key | 0x80 // Set ASCII code and strobe bit
+	p.kbdcr |= 0x80
 }
 
 type A1 struct {
@@ -164,116 +169,6 @@ func (c *A1) Step() uint8 {
 	return cpuCycles
 }
 
-func (c *A1) HandleKey(r rune) {
-	// Apple 1 only accepted uppercase ASCII
-	// Convert to uppercase and ensure it's in ASCII range
-	ascii := byte(unicode.ToUpper(r))
-
-	// Special key translations
-	switch r {
-	case '\n', '\r':
-		ascii = 0x0D // Return key -> Carriage Return
-	case '\b', 127:
-		ascii = 0x5F // Backspace/Delete -> Underscore (Apple 1's delete char)
-	case '\t':
-		ascii = 0x09 // Tab
-	case 0x1B:
-		ascii = 0x1B // Escape
-	}
-
-	// Only process printable ASCII chars and control chars
-	if ascii <= 0x7F {
-		c.PIA.KeyPress(ascii)
-	}
-}
-
-type Model struct {
-	emu      *A1
-	display  string
-	quitting bool
-	paused   bool
-}
-
-func NewModel(emu *A1) Model {
-	m := Model{
-		emu:     emu,
-		display: "",
-	}
-
-	emu.PIA.OnDisplay = func(char byte) {
-		// Append the new character to display
-		//char := byte(char)
-		if char == 0x0D { // Carriage return
-			m.display += "\n"
-		} else {
-			m.display += string(char)
-		}
-	}
-	return m
-
-}
-
-// Define our messages
-func (m Model) Init() tea.Cmd {
-	return tick()
-}
-
-// Add a tick command to drive the emulation
-func tick() tea.Cmd {
-	return tea.Tick(time.Millisecond*16, func(t time.Time) tea.Msg {
-		return tickMsg{}
-	})
-}
-
-type tickMsg struct{}
-
-var cyclesPerTick = 1
-
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c", "q":
-			m.quitting = true
-			return m, tea.Quit
-		default:
-			// Convert key press to Apple 1 format and send to PIA
-			m.emu.HandleKey(rune(msg.String()[0]))
-			return m, nil
-		}
-
-	case tickMsg:
-		if !m.paused {
-			// Run CPU for cyclesPerTick cycles
-			for i := 0; i < cyclesPerTick; i++ {
-				m.emu.Step()
-			}
-		}
-		return m, tick()
-	}
-
-	return m, nil
-}
-
-func (m Model) View() string {
-	status := "RUNNING"
-	if m.paused {
-		status = "PAUSED"
-	}
-
-	return fmt.Sprintf(`
-╭────── Apple 1 Emulator ──────╮
-Status: %s
-PC: %04X  A: %02X  X: %02X  Y: %02X
-%s
-╰─────────────────────────────╯
-Commands:
- Space: Pause/Resume
- S: Single step (when paused)
- Q: Quit
-`, status, m.emu.CPU.PC, m.emu.CPU.A, m.emu.CPU.X, m.emu.CPU.Y, m.display)
-}
-
 func main() {
 	computer, err := NewA1()
 	if err != nil {
@@ -303,16 +198,66 @@ func main() {
 		computer.CPU.PC = uint16(mem.Read(0xFFFC)) | uint16(mem.Read(0xFFFD))<<8
 		computer.CPU.PC = 0xFF1F
 
-		fmt.Printf("%x\n", computer.CPU.PC)
+		if true {
+			mon := NewMonitor(computer, computer.CPU, computer.Memory, computer.PIA)
+			p := tea.NewProgram(mon)
 
-		p := tea.NewProgram(NewModel(computer))
-		if err := p.Start(); err != nil {
-			fmt.Printf("Error running program: %v", err)
+			logger := slog.New(slog.NewTextHandler(mon, nil))
+			slog.SetDefault(logger)
+
+			if _, err := p.Run(); err != nil {
+				fmt.Printf("Error running program: %v", err)
+			}
+			return nil
 		}
-		return nil
+
+		if err := keyboard.Open(); err != nil {
+			return err
+		}
+		defer keyboard.Close()
+
+		computer.PIA.OnDisplay = func(char byte) {
+			if char == '\r' {
+				fmt.Print("\n")
+			} else {
+				fmt.Print(string(char))
+			}
+		}
+
+		keysEvents, err := keyboard.GetKeys(10)
+		if err != nil {
+			return err
+		}
 
 		// Main emulation loop
+	loop:
 		for computer.IsRunning() {
+			select {
+			case k := <-keysEvents:
+				char := k.Rune
+				// Convert lowercase to uppercase
+				if char >= 'a' && char <= 'z' {
+					char = char - 32
+				}
+
+				switch k.Key {
+				case keyboard.KeyF10:
+					break loop
+				case keyboard.KeyEsc:
+					computer.PIA.KeyPress(0x1B) // Send ESC to PIA
+				case keyboard.KeySpace:
+					computer.PIA.KeyPress(' ')
+				case keyboard.KeyEnter:
+					computer.PIA.KeyPress(0x0D) // CR
+				case keyboard.KeyBackspace, keyboard.KeyBackspace2:
+					computer.PIA.KeyPress(0x08) // BS
+				default:
+					if char >= 0x20 && char <= 0x7F {
+						computer.PIA.KeyPress(byte(char))
+					}
+				}
+			default:
+			}
 			computer.Step()
 			if err := computer.CPU.Error(); err != nil {
 				panic(err)
